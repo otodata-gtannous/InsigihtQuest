@@ -21,7 +21,7 @@ def _load_engine():
 
 @st.cache_data(ttl=300)
 def _load_sales_data(from_date: date, to_date: date) -> pd.DataFrame:
-    return fetch_sales_data(_load_engine(), from_date, to_date)
+    return fetch_sales_data(_load_engine(), get_config(), from_date, to_date)
 
 
 def _format_periods(periods: pd.DataFrame) -> pd.DataFrame:
@@ -33,8 +33,8 @@ def _format_periods(periods: pd.DataFrame) -> pd.DataFrame:
 def main() -> None:
     st.title("Sales peaks and lows")
     st.caption(
-        "Purchase volume is counted from owner records linked to devices, "
-        "using Ownerships.CreatedDate as the purchase date."
+        "Purchase volume is loaded from the configured source mode. "
+        "For flat-table mode, it uses IQ_COL_SALES_DATE and IQ_COL_SALES_AMOUNT."
     )
 
     st.sidebar.header("Sales filters")

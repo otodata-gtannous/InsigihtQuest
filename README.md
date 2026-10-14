@@ -31,26 +31,19 @@ pip install -r requirements.txt
 
 ## 2) Configure data source
 
-By default, the app reads from the device installation graph in `otodatawebportal_dev`:
-- `TankSensors` -> `Sensors` -> `Devices`
-- `TankSensors` -> `Tanks` -> `Locations` -> `Customers`
+The app uses the consolidated flat source table for all datasets:
+- `IQ_SOURCE_MODE=flat-table`
+- `IQ_SOURCE_TABLE=<your table>` (for example `dbo.Insight Project`)
 
-Installation date is selected in this priority:
-- `Devices.InitialInstallDate`
-- `Devices.DetectedInstallDate`
-- `TankSensors.CreatedDate`
-
-Coordinates come from:
-- `Locations.Latitude`
-- `Locations.Longitude`
+Flat-table mode uses your configured columns, including:
+- `IQ_COL_LATITUDE` (for example `DeviceLat`)
+- `IQ_COL_LONGITUDE` (for example `DeviceLong`)
 
 If your schema differs, set `IQ_MAP_SQL` and `IQ_TREND_SQL` in `.env`.
 
-The **Sales peaks and lows** page counts rows from `dbo.Ownerships` linked to
-`dbo.Devices` (`Ownerships.DeviceId = Devices.Id`), filtered to `IsOwner = 1`
-and `IsDeleted = 0`. `Ownerships.CreatedDate` is treated as the purchase date.
-The page shows total purchases and the highest/lowest periods for the selected
-date range.
+The **Sales peaks and lows** page reads from your flat table using:
+- `IQ_COL_SALES_DATE`
+- `IQ_COL_SALES_AMOUNT`
 
 ### Coordinate options
 
@@ -70,10 +63,7 @@ For trend/projection, you can optionally set `IQ_TREND_SQL` returning:
 - `installed_at`
 - `customer_name`
 
-The Sales by territory page currently uses device installations as a sales proxy.
-It attributes each installation to the territory assigned to the device's current
-owner (`Ownerships.IsOwner = 1` → `Companies.TerritoryId` → `Territories.Name`).
-Devices without an active owner or territory appear under "Unknown Territory".
+The Sales by territory page uses `IQ_COL_TERRITORY` from the flat table.
 
 ## 3) Run
 

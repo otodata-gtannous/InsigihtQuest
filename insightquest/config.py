@@ -24,13 +24,17 @@ class AppConfig:
     db_password: str
     db_driver: str
     db_trust_cert: bool
+    source_mode: str
     source_table: str
     col_device: str
     col_location: str
     col_installed_at: str
     col_customer: str
-    col_latitude: str | None
-    col_longitude: str | None
+    col_latitude: str
+    col_longitude: str
+    col_territory: str
+    col_sales_date: str
+    col_sales_amount: str
     custom_map_sql: str | None
     custom_trend_sql: str | None
 
@@ -45,13 +49,17 @@ def get_config() -> AppConfig:
         db_password=os.getenv("IQ_DB_PASSWORD", ""),
         db_driver=os.getenv("IQ_DB_DRIVER", "ODBC Driver 18 for SQL Server"),
         db_trust_cert=_as_bool(os.getenv("IQ_DB_TRUST_CERT"), default=True),
-        source_table=os.getenv("IQ_SOURCE_TABLE", "MonitorInstallations"),
-        col_device=os.getenv("IQ_COL_DEVICE", "MonitorName"),
+        source_mode=os.getenv("IQ_SOURCE_MODE", "flat-table"),
+        source_table=os.getenv("IQ_SOURCE_TABLE", "dbo.Insight Project"),
+        col_device=os.getenv("IQ_COL_DEVICE", "DeviceName"),
         col_location=os.getenv("IQ_COL_LOCATION", "DeviceLocation"),
         col_installed_at=os.getenv("IQ_COL_INSTALLED_AT", "InstalledAt"),
         col_customer=os.getenv("IQ_COL_CUSTOMER", "CustomerName"),
-        col_latitude=os.getenv("IQ_COL_LATITUDE") or None,
-        col_longitude=os.getenv("IQ_COL_LONGITUDE") or None,
+        col_latitude=os.getenv("IQ_COL_LATITUDE", "DeviceLat"),
+        col_longitude=os.getenv("IQ_COL_LONGITUDE", "DeviceLong"),
+        col_territory=os.getenv("IQ_COL_TERRITORY", "TerritoryName"),
+        col_sales_date=os.getenv("IQ_COL_SALES_DATE", "SalesDate"),
+        col_sales_amount=os.getenv("IQ_COL_SALES_AMOUNT", "SalesAmount"),
         custom_map_sql=os.getenv("IQ_MAP_SQL") or None,
         custom_trend_sql=os.getenv("IQ_TREND_SQL") or None,
     )

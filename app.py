@@ -49,14 +49,16 @@ def _load_trend_data(from_date: date, to_date: date, limit: int) -> pd.DataFrame
 
 @st.cache_data(ttl=300)
 def _load_territory_trend_data(from_date: date, to_date: date, limit: int) -> pd.DataFrame:
+    config = get_config()
     engine = _load_engine()
-    return fetch_install_territory_trend_data(engine, from_date, to_date, limit)
+    return fetch_install_territory_trend_data(engine, config, from_date, to_date, limit)
 
 
 @st.cache_data(ttl=300)
 def _load_diagnostics(from_date: date, to_date: date) -> pd.DataFrame:
+    config = get_config()
     engine = _load_engine()
-    return fetch_data_source_diagnostics(engine, from_date, to_date)
+    return fetch_data_source_diagnostics(engine, config, from_date, to_date)
 
 
 def main() -> None:
