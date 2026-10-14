@@ -1,0 +1,2 @@
+"""InsightQuest application package."""
+

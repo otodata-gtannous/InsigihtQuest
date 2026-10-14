@@ -1,0 +1,6 @@
+streamlit==1.39.0
+pandas==2.2.3
+SQLAlchemy==2.0.36
+pyodbc==5.1.0
+python-dotenv==1.0.1
+statsmodels==0.14.4
