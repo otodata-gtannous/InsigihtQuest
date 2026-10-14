@@ -68,7 +68,7 @@ The Sales by territory page uses `IQ_COL_TERRITORY` from the flat table.
 ## 3) Run
 
 ```bash
-streamlit run app.py
+streamlit run dashboard.py
 ```
 
 ## Notes on projection
