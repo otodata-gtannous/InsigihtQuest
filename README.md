@@ -49,11 +49,16 @@ not values entered in the UI. Coordinate mappings are `IQ_COL_LATITUDE` and
 `IQ_COL_LONGITUDE`; installation, customer, territory, purchase, shipment,
 market, and inventory mappings are only needed for pages using those analyses.
 
-The current database table inspected during implementation exposes `Id`,
-`DeviceLat`, and `DeviceLong`; it does not currently expose the purchase,
-installation, shipping, segmentation, market, or inventory inputs below.
-Therefore those analyses remain in a clear “not available” state until the
-flat table provides the required fields and mappings.
+The current database table inspected during implementation exposes
+`Id`, `CompanyId`, `DeviceType`, `PurchaseDate`, `DeviceInitialInstallDate`,
+and `TankInstallDate`. The default installation date mapping is
+`TankInstallDate`; latitude and longitude are configured as `DeviceLat` and
+`DeviceLong` as requested. The schema inspection did not return those coordinate
+columns, so the map will remain unavailable until they are present on the
+configured table. Purchase amount, shipment, customer-size, territory, market,
+and inventory inputs are also not currently present, so analyses requiring
+them remain unavailable until the flat table is extended and those columns are
+mapped.
 
 ### Required source fields by analysis
 
