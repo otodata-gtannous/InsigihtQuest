@@ -23,7 +23,9 @@ def build_sales_periods(
     frame = sales_df.copy()
     if frame.empty:
         frame = pd.DataFrame(columns=["purchase_date", "sales"])
-    frame["purchase_date"] = pd.to_datetime(frame["purchase_date"], errors="coerce").dt.normalize()
+    frame["purchase_date"] = pd.to_datetime(
+        frame["purchase_date"], errors="coerce"
+    ).dt.normalize()
     frame["sales"] = pd.to_numeric(frame["sales"], errors="coerce").fillna(0)
     frame = frame.dropna(subset=["purchase_date"])
 
@@ -32,7 +34,6 @@ def build_sales_periods(
         frame.groupby("purchase_date")["sales"]
         .sum()
         .reindex(calendar, fill_value=0)
-        .astype(int)
     )
 
     if period == "Day":
@@ -40,9 +41,15 @@ def build_sales_periods(
         return result[columns]
 
     if period == "Week":
-        period_starts = daily_sales.index - pd.to_timedelta(daily_sales.index.dayofweek, unit="D")
-        first_period = calendar[0] - pd.Timedelta(days=calendar[0].dayofweek)
-        last_period = calendar[-1] - pd.Timedelta(days=calendar[-1].dayofweek)
+        period_starts = daily_sales.index - pd.to_timedelta(
+            daily_sales.index.dayofweek, unit="D"
+        )
+        first_period = pd.Timestamp(calendar[0]) - pd.Timedelta(
+            int(calendar[0].dayofweek), unit="D"
+        )
+        last_period = pd.Timestamp(calendar[-1]) - pd.Timedelta(
+            int(calendar[-1].dayofweek), unit="D"
+        )
         all_periods = pd.date_range(first_period, last_period, freq="7D")
     else:
         period_starts = daily_sales.index.to_period("M").to_timestamp()
@@ -50,14 +57,10 @@ def build_sales_periods(
         last_period = calendar[-1].to_period("M").to_timestamp()
         all_periods = pd.date_range(first_period, last_period, freq="MS")
 
-    period_sales = (
-        daily_sales.groupby(period_starts)
-        .sum()
-        .reindex(all_periods, fill_value=0)
-        .astype(int)
+    period_sales = daily_sales.groupby(period_starts).sum().reindex(
+        all_periods, fill_value=0
     )
-    result = period_sales.rename_axis("period_start").reset_index()
-    return result[columns]
+    return period_sales.rename_axis("period_start").reset_index()[columns]
 
 
 @dataclass(frozen=True)
@@ -74,6 +77,212 @@ class ForecastBacktest:
     rmse: float | None
     mape: float | None
     details: pd.DataFrame
+
+
+@dataclass(frozen=True)
+class ShippingLagSummary:
+    matched_rows: int
+    missing_date_rows: int
+    negative_lag_rows: int
+    median_days: float | None
+    percentile_90_days: float | None
+
+
+def build_installation_periods(
+    installs_df: pd.DataFrame,
+    period: str,
+    from_date: date,
+    to_date: date,
+) -> pd.DataFrame:
+    if installs_df.empty:
+        frame = pd.DataFrame(columns=["purchase_date", "sales"])
+    else:
+        frame = installs_df[["installed_at"]].rename(
+            columns={"installed_at": "purchase_date"}
+        ).copy()
+        frame["sales"] = 1
+    return build_sales_periods(frame, period, from_date, to_date).rename(
+        columns={"sales": "installs"}
+    )
+
+
+def build_purchase_install_comparison(
+    purchases_df: pd.DataFrame,
+    installs_df: pd.DataFrame,
+    period: str,
+    from_date: date,
+    to_date: date,
+) -> pd.DataFrame:
+    purchases = build_sales_periods(
+        purchases_df, period, from_date, to_date
+    ).rename(columns={"sales": "purchases"})
+    installs = build_installation_periods(
+        installs_df, period, from_date, to_date
+    )
+    return purchases.merge(installs, on="period_start", how="outer").fillna(
+        {"purchases": 0, "installs": 0}
+    )
+
+
+def build_segment_periods(
+    data: pd.DataFrame,
+    date_column: str,
+    segment_column: str,
+    period: str,
+) -> pd.DataFrame:
+    if period not in {"Day", "Week", "Month"}:
+        raise ValueError("Period must be Day, Week, or Month.")
+    columns = ["period_start", "segment", "count"]
+    if data.empty:
+        return pd.DataFrame(columns=columns)
+
+    frame = data[[date_column, segment_column]].copy()
+    frame[date_column] = pd.to_datetime(frame[date_column], errors="coerce")
+    frame = frame.dropna(subset=[date_column])
+    frame["segment"] = frame[segment_column].fillna("Unknown").astype(str).str.strip()
+    frame.loc[frame["segment"] == "", "segment"] = "Unknown"
+    dates = frame[date_column].dt.normalize()
+    if period == "Day":
+        frame["period_start"] = dates
+    elif period == "Week":
+        frame["period_start"] = dates - pd.to_timedelta(
+            dates.dt.dayofweek, unit="D"
+        )
+    else:
+        frame["period_start"] = dates.dt.to_period("M").dt.to_timestamp()
+
+    return (
+        frame.groupby(["period_start", "segment"])
+        .size()
+        .rename("count")
+        .reset_index()[columns]
+        .sort_values(["period_start", "segment"])
+        .reset_index(drop=True)
+    )
+
+
+def build_shipping_lag(data: pd.DataFrame) -> tuple[pd.DataFrame, ShippingLagSummary]:
+    columns = ["shipping_date", "installed_at", "lag_days"]
+    if data.empty:
+        return pd.DataFrame(columns=columns), ShippingLagSummary(0, 0, 0, None, None)
+
+    frame = data[["shipping_date", "installed_at"]].copy()
+    frame["shipping_date"] = pd.to_datetime(frame["shipping_date"], errors="coerce")
+    frame["installed_at"] = pd.to_datetime(frame["installed_at"], errors="coerce")
+    missing_dates = frame["shipping_date"].isna() | frame["installed_at"].isna()
+    complete = frame.loc[~missing_dates].copy()
+    complete["lag_days"] = (
+        complete["installed_at"] - complete["shipping_date"]
+    ).dt.total_seconds() / 86_400
+    negative_lag = complete["lag_days"] < 0
+    valid = complete.loc[~negative_lag, columns].reset_index(drop=True)
+    summary = ShippingLagSummary(
+        matched_rows=len(valid),
+        missing_date_rows=int(missing_dates.sum()),
+        negative_lag_rows=int(negative_lag.sum()),
+        median_days=float(valid["lag_days"].median()) if not valid.empty else None,
+        percentile_90_days=(
+            float(valid["lag_days"].quantile(0.9)) if not valid.empty else None
+        ),
+    )
+    return valid, summary
+
+
+def build_cohort_installation_rate(
+    data: pd.DataFrame,
+    denominator_column: str,
+) -> pd.DataFrame:
+    columns = [
+        "cohort_month",
+        "shipped_units",
+        "installed_units",
+        "installation_rate_pct",
+    ]
+    if data.empty:
+        return pd.DataFrame(columns=columns)
+
+    frame = data[["shipping_date", "installed_at", denominator_column]].copy()
+    frame["shipping_date"] = pd.to_datetime(frame["shipping_date"], errors="coerce")
+    frame["installed_at"] = pd.to_datetime(frame["installed_at"], errors="coerce")
+    frame[denominator_column] = pd.to_numeric(
+        frame[denominator_column], errors="coerce"
+    )
+    frame = frame.dropna(subset=["shipping_date", denominator_column])
+    frame = frame[frame[denominator_column] > 0].copy()
+    frame["cohort_month"] = frame["shipping_date"].dt.to_period("M").dt.to_timestamp()
+    installed = frame["installed_at"].notna() & (
+        frame["installed_at"] >= frame["shipping_date"]
+    )
+    frame["shipped_units"] = frame[denominator_column]
+    frame["installed_units"] = np.where(installed, frame[denominator_column], 0)
+    result = (
+        frame.groupby("cohort_month")[["shipped_units", "installed_units"]]
+        .sum()
+        .reset_index()
+    )
+    result["installation_rate_pct"] = (
+        result["installed_units"] / result["shipped_units"] * 100
+    ).round(2)
+    return result[columns].sort_values("cohort_month").reset_index(drop=True)
+
+
+def build_inventory_risk(data: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "item",
+        "on_hand",
+        "daily_demand",
+        "lead_time_days",
+        "coverage_days",
+        "projected_on_hand",
+        "reorder_point",
+        "max_stock",
+        "risk",
+    ]
+    if data.empty:
+        return pd.DataFrame(columns=columns)
+
+    frame = data.rename(
+        columns={
+            "item_name": "item",
+            "inventory_on_hand": "on_hand",
+            "inventory_daily_demand": "daily_demand",
+            "replenishment_days": "lead_time_days",
+        }
+    ).copy()
+    numeric_columns = [
+        "on_hand",
+        "daily_demand",
+        "lead_time_days",
+        "reorder_point",
+        "max_stock",
+    ]
+    for column in numeric_columns:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    frame = frame.dropna(subset=numeric_columns)
+    frame = frame[
+        (frame["on_hand"] >= 0)
+        & (frame["daily_demand"] >= 0)
+        & (frame["lead_time_days"] >= 0)
+        & (frame["reorder_point"] >= 0)
+        & (frame["max_stock"] >= frame["reorder_point"])
+    ].copy()
+    frame["coverage_days"] = np.where(
+        frame["daily_demand"] > 0,
+        frame["on_hand"] / frame["daily_demand"],
+        np.inf,
+    )
+    frame["projected_on_hand"] = (
+        frame["on_hand"] - frame["daily_demand"] * frame["lead_time_days"]
+    )
+    frame["risk"] = np.select(
+        [
+            frame["projected_on_hand"] < frame["reorder_point"],
+            frame["on_hand"] > frame["max_stock"],
+        ],
+        ["Stockout risk", "Overstock risk"],
+        default="Within thresholds",
+    )
+    return frame[columns].sort_values(["risk", "item"]).reset_index(drop=True)
 
 
 def build_trend_series(

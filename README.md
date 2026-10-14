@@ -1,18 +1,26 @@
 # InsightQuest
 
-InsightQuest is a Streamlit app for monitor installation analytics from `otodatawebportal_dev`.
+InsightQuest is a Streamlit analytics app. All analysis is read from one
+configured SQL Server flat table.
 
-Current scope (v1):
-- Connect to SQL Server
-- Load monitor installation rows
-- Show clustered installations on a map with install/customer counts and top monitor types
-- Show installation trend by day/week/month
-- Show a seasonality-aware projection for future periods
-- Show monthly seasonality profile (average installs by month)
-- Filter trend/projection by customer
-- Show sales peaks and lows by day/week/month using non-deleted owner purchases
-- Show data diagnostics (coverage and install-date source mix)
-- Compare device installation counts by territory over time
+## Analysis pages
+
+- **Overview** (`dashboard.py`): installation map, territory trend, projections,
+  and source diagnostics where the configured columns are available.
+- **Purchases & installations**: compare purchase measure and installation
+  peaks/lows by day, week, or month.
+- **Territory, customer & product mix**: compare installation counts by the
+  configured dimensions.
+- **Shipping to installation**: calculate shipment-to-installation delay for
+  records with paired dates and a stable key.
+- **Installation rate & forecasts**: show shipment-cohort installation rate,
+  purchase/install forecasts, and market indicator context when mapped.
+- **Inventory risk**: calculate stockout/overstock indicators from confirmed
+  inventory and demand inputs.
+
+Each page checks the configured flat-table schema and reports missing mappings
+or columns. It does not silently substitute another data source or fabricate
+results.
 
 ## 1) Setup
 
@@ -29,41 +37,47 @@ pip install -r requirements.txt
    - `IQ_DB_AUTH_MODE=windows` for Windows integrated auth
    - `IQ_DB_AUTH_MODE=auto` to infer from config (`IQ_DB_USER` empty => windows)
 
-## 2) Configure data source
+## 2) Configure the flat-table source
 
-The app uses the consolidated flat source table for all datasets:
+The app uses a single consolidated flat table for every dataset:
 - `IQ_SOURCE_MODE=flat-table`
-- `IQ_SOURCE_TABLE=<your table>` (for example `dbo.Insight Project`)
+- `IQ_SOURCE_TABLE=<schema.table>` (for example `dbo.Insight Project`)
 
-Flat-table mode uses your configured columns, including:
-- `IQ_COL_LATITUDE` (for example `DeviceLat`)
-- `IQ_COL_LONGITUDE` (for example `DeviceLong`)
+Copy `.env.example` to `.env` and map each `IQ_COL_*` setting to a column that
+exists in this table. Column names are administrator-controlled configuration,
+not values entered in the UI. Coordinate mappings are `IQ_COL_LATITUDE` and
+`IQ_COL_LONGITUDE`; installation, customer, territory, purchase, shipment,
+market, and inventory mappings are only needed for pages using those analyses.
 
-If your schema differs, set `IQ_MAP_SQL` and `IQ_TREND_SQL` in `.env`.
+The current database table inspected during implementation exposes `Id`,
+`DeviceLat`, and `DeviceLong`; it does not currently expose the purchase,
+installation, shipping, segmentation, market, or inventory inputs below.
+Therefore those analyses remain in a clear “not available” state until the
+flat table provides the required fields and mappings.
 
-The **Sales peaks and lows** page reads from your flat table using:
-- `IQ_COL_SALES_DATE`
-- `IQ_COL_SALES_AMOUNT`
+### Required source fields by analysis
+
+| Analysis | Flat-table fields |
+| --- | --- |
+| Overview map and installation analysis | Device key/name, installation date, coordinates; customer/territory for their respective breakdowns |
+| Purchase and installation peaks/lows | Purchase date, purchase measure, installation date |
+| Territory/customer/product mix | Installation date, territory, customer-size segment, product type |
+| Shipping-to-installation delay | Shipment date, installation date, stable shipment/device key |
+| Shipment-cohort installation rate | Shipment date, installation date, eligible shipped-unit denominator |
+| Forecasts and market context | Purchase date/measure, installation date; market indicator and its date for context |
+| Inventory risk | Item/SKU, snapshot date, on-hand quantity, daily demand, replenishment lead days, reorder point, maximum stock |
+
+The installation rate is installed eligible units to date divided by eligible
+units shipped in each shipment-month cohort; recent cohorts may be incomplete.
+The market indicator is displayed as context, not as a causal forecast input.
+Inventory quantities, daily demand, and thresholds must use matching units.
+Map these values only after their definitions and source grain are confirmed.
 
 ### Coordinate options
 
 Use either:
 - `IQ_COL_LATITUDE` and `IQ_COL_LONGITUDE` for explicit numeric columns, or
 - `IQ_COL_LOCATION` containing values like `45.5017,-73.5673`
-
-Optionally, set `IQ_MAP_SQL` with custom SQL returning aliases:
-- `device_name`
-- `customer_name`
-- `device_location`
-- `installed_at`
-- `latitude`
-- `longitude`
-
-For trend/projection, you can optionally set `IQ_TREND_SQL` returning:
-- `installed_at`
-- `customer_name`
-
-The Sales by territory page uses `IQ_COL_TERRITORY` from the flat table.
 
 ## 3) Run
 
@@ -73,11 +87,17 @@ streamlit run dashboard.py
 
 ## Notes on projection
 
-The current projection uses seasonal forecasting with:
+Purchase and installation projections are built as separate monthly series.
+Forecasting uses:
 - Holt-Winters exponential smoothing (primary model)
 - Seasonal naive fallback when history is too short for stable model fitting
 
-The Trend page also shows rolling backtest quality metrics:
+Rolling backtests report:
 - MAE
 - RMSE
 - MAPE (when actual values are non-zero)
+
+Forecast results are projections, not actuals. The inventory page evaluates
+projected on-hand as current on-hand minus daily demand times replenishment
+lead time; it requires validated flat-table inputs and does not create a
+forecast when those inputs are missing.

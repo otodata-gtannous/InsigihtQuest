@@ -35,8 +35,20 @@ class AppConfig:
     col_territory: str
     col_sales_date: str
     col_sales_amount: str
-    custom_map_sql: str | None
-    custom_trend_sql: str | None
+    col_shipped_at: str
+    col_shipping_key: str
+    col_customer_size: str
+    col_product_type: str
+    col_rate_denominator: str
+    col_market_indicator: str
+    col_market_indicator_at: str
+    col_inventory_on_hand: str
+    col_inventory_demand: str
+    col_inventory_as_of: str
+    col_inventory_item: str
+    col_replenishment_days: str
+    col_reorder_point: str
+    col_max_stock: str
 
 
 def get_config() -> AppConfig:
@@ -51,15 +63,27 @@ def get_config() -> AppConfig:
         db_trust_cert=_as_bool(os.getenv("IQ_DB_TRUST_CERT"), default=True),
         source_mode=os.getenv("IQ_SOURCE_MODE", "flat-table"),
         source_table=os.getenv("IQ_SOURCE_TABLE", "dbo.Insight Project"),
-        col_device=os.getenv("IQ_COL_DEVICE", "DeviceName"),
-        col_location=os.getenv("IQ_COL_LOCATION", "DeviceLocation"),
-        col_installed_at=os.getenv("IQ_COL_INSTALLED_AT", "InstalledAt"),
-        col_customer=os.getenv("IQ_COL_CUSTOMER", "CustomerName"),
+        col_device=os.getenv("IQ_COL_DEVICE", "Id"),
+        col_location=os.getenv("IQ_COL_LOCATION", ""),
+        col_installed_at=os.getenv("IQ_COL_INSTALLED_AT", ""),
+        col_customer=os.getenv("IQ_COL_CUSTOMER", ""),
         col_latitude=os.getenv("IQ_COL_LATITUDE", "DeviceLat"),
         col_longitude=os.getenv("IQ_COL_LONGITUDE", "DeviceLong"),
-        col_territory=os.getenv("IQ_COL_TERRITORY", "TerritoryName"),
-        col_sales_date=os.getenv("IQ_COL_SALES_DATE", "SalesDate"),
-        col_sales_amount=os.getenv("IQ_COL_SALES_AMOUNT", "SalesAmount"),
-        custom_map_sql=os.getenv("IQ_MAP_SQL") or None,
-        custom_trend_sql=os.getenv("IQ_TREND_SQL") or None,
+        col_territory=os.getenv("IQ_COL_TERRITORY", ""),
+        col_sales_date=os.getenv("IQ_COL_SALES_DATE", ""),
+        col_sales_amount=os.getenv("IQ_COL_SALES_AMOUNT", ""),
+        col_shipped_at=os.getenv("IQ_COL_SHIPPED_AT", ""),
+        col_shipping_key=os.getenv("IQ_COL_SHIPPING_KEY", "Id"),
+        col_customer_size=os.getenv("IQ_COL_CUSTOMER_SIZE", ""),
+        col_product_type=os.getenv("IQ_COL_PRODUCT_TYPE", ""),
+        col_rate_denominator=os.getenv("IQ_COL_RATE_DENOMINATOR", ""),
+        col_market_indicator=os.getenv("IQ_COL_MARKET_INDICATOR", ""),
+        col_market_indicator_at=os.getenv("IQ_COL_MARKET_INDICATOR_AT", ""),
+        col_inventory_on_hand=os.getenv("IQ_COL_INVENTORY_ON_HAND", ""),
+        col_inventory_demand=os.getenv("IQ_COL_INVENTORY_DEMAND", ""),
+        col_inventory_as_of=os.getenv("IQ_COL_INVENTORY_AS_OF", ""),
+        col_inventory_item=os.getenv("IQ_COL_INVENTORY_ITEM", ""),
+        col_replenishment_days=os.getenv("IQ_COL_REPLENISHMENT_DAYS", ""),
+        col_reorder_point=os.getenv("IQ_COL_REORDER_POINT", ""),
+        col_max_stock=os.getenv("IQ_COL_MAX_STOCK", ""),
     )

@@ -25,6 +25,11 @@ from insightquest.data import (
     fetch_install_trend_data,
 )
 from insightquest.db import create_db_engine
+from insightquest.page_helpers import (
+    get_source_columns,
+    missing_source_fields,
+    show_source_readiness,
+)
 
 st.set_page_config(page_title="InsightQuest", layout="wide")
 
@@ -101,13 +106,68 @@ def main() -> None:
         st.error("From date must be earlier than or equal to To date.")
         return
 
+    config = get_config()
     try:
-        map_data = _load_map_data(from_date, to_date, int(map_limit))
-        trend_raw = _load_trend_data(from_date, to_date, int(trend_limit))
-        territory_trend_raw = _load_territory_trend_data(
-            from_date, to_date, int(trend_limit)
+        source_columns = get_source_columns()
+    except (SQLAlchemyError, ValueError) as ex:
+        st.error("Unable to inspect the configured flat-table source.")
+        st.exception(ex)
+        return
+
+    map_requirements = {
+        "Device": "col_device",
+        "Customer": "col_customer",
+        "Installation date": "col_installed_at",
+        "Latitude": "col_latitude",
+        "Longitude": "col_longitude",
+    }
+    trend_requirements = {
+        "Installation date": "col_installed_at",
+        "Customer": "col_customer",
+    }
+    territory_requirements = {
+        "Installation date": "col_installed_at",
+        "Territory": "col_territory",
+    }
+    diagnostics_requirements = {
+        **trend_requirements,
+        "Latitude": "col_latitude",
+        "Longitude": "col_longitude",
+    }
+    map_ready = not any(
+        missing_source_fields(config, source_columns, map_requirements)
+    )
+    trend_ready = not any(
+        missing_source_fields(config, source_columns, trend_requirements)
+    )
+    territory_ready = not any(
+        missing_source_fields(config, source_columns, territory_requirements)
+    )
+    diagnostics_ready = not any(
+        missing_source_fields(config, source_columns, diagnostics_requirements)
+    )
+
+    try:
+        map_data = (
+            _load_map_data(from_date, to_date, int(map_limit))
+            if map_ready
+            else pd.DataFrame()
         )
-        diagnostics = _load_diagnostics(from_date, to_date)
+        trend_raw = (
+            _load_trend_data(from_date, to_date, int(trend_limit))
+            if trend_ready
+            else pd.DataFrame()
+        )
+        territory_trend_raw = (
+            _load_territory_trend_data(from_date, to_date, int(trend_limit))
+            if territory_ready
+            else pd.DataFrame()
+        )
+        diagnostics = (
+            _load_diagnostics(from_date, to_date)
+            if diagnostics_ready
+            else pd.DataFrame()
+        )
     except ValueError as ex:
         st.error(str(ex))
         st.stop()
@@ -128,7 +188,9 @@ def main() -> None:
     )
 
     with map_tab:
-        if map_data.empty:
+        if not map_ready:
+            show_source_readiness(config, source_columns, map_requirements)
+        elif map_data.empty:
             st.warning(
                 "No mappable rows found for the selected period. "
                 "If your `DeviceLocation` is not 'lat,lon', configure IQ_COL_LATITUDE and IQ_COL_LONGITUDE."
@@ -189,7 +251,9 @@ def main() -> None:
             "Sales are represented by device installs. Each install is attributed to "
             "the territory of the device's current owner company."
         )
-        if territory_trend_raw.empty:
+        if not territory_ready:
+            show_source_readiness(config, source_columns, territory_requirements)
+        elif territory_trend_raw.empty:
             st.warning("No installation rows found for territory sales in the selected period.")
         else:
             territory_options = sorted(
@@ -236,6 +300,9 @@ def main() -> None:
                 st.dataframe(territory_totals, use_container_width=True)
 
     with trend_tab:
+        if not trend_ready:
+            show_source_readiness(config, source_columns, trend_requirements)
+            return
         if trend_raw.empty:
             st.warning("No installation rows found for trend in the selected period.")
             return
@@ -334,6 +401,9 @@ def main() -> None:
         )
 
     with diag_tab:
+        if not diagnostics_ready:
+            show_source_readiness(config, source_columns, diagnostics_requirements)
+            return
         if diagnostics.empty:
             st.warning("No diagnostics data available for the selected period.")
             return

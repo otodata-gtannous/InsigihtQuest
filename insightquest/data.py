@@ -4,7 +4,7 @@ import re
 from datetime import date, datetime, time, timedelta
 
 import pandas as pd
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
 from insightquest.config import AppConfig
@@ -47,6 +47,89 @@ def _ensure_flat_mode(config: AppConfig) -> None:
         )
 
 
+def fetch_flat_table_columns(engine: Engine, config: AppConfig) -> set[str]:
+    """Return column names from the configured flat table without reading rows."""
+    _ensure_flat_mode(config)
+    parts = [part.strip() for part in config.source_table.split(".") if part.strip()]
+    if len(parts) == 1:
+        schema, table = "dbo", parts[0]
+    elif len(parts) == 2:
+        schema, table = parts
+    else:
+        raise ValueError(f"Invalid table name format: '{config.source_table}'")
+
+    inspector = inspect(engine)
+    if not inspector.has_table(table, schema=schema):
+        raise ValueError(f"Configured flat table '{schema}.{table}' does not exist or is not visible.")
+    return {column["name"] for column in inspector.get_columns(table, schema=schema)}
+
+
+def fetch_flat_table_rows(
+    engine: Engine,
+    config: AppConfig,
+    fields: dict[str, str],
+    date_field: str | None = None,
+    from_date: date | None = None,
+    to_date: date | None = None,
+    limit: int = 100_000,
+) -> pd.DataFrame:
+    """Read selected mapped columns from the configured flat table."""
+    _ensure_flat_mode(config)
+    if not fields:
+        raise ValueError("At least one flat-table field mapping is required.")
+    if limit < 1:
+        raise ValueError("Row limit must be greater than zero.")
+    if (from_date is None) != (to_date is None):
+        raise ValueError("Both date bounds must be provided together.")
+    if from_date is not None and from_date > to_date:
+        raise ValueError("From date must be earlier than or equal to To date.")
+
+    available = {name.casefold() for name in fetch_flat_table_columns(engine, config)}
+    configured = dict(fields)
+    if date_field:
+        configured["filter_date"] = date_field
+
+    selected_columns: list[str] = []
+    for alias, attribute in configured.items():
+        column_name = getattr(config, attribute, "")
+        if not column_name:
+            raise ValueError(f"No column is configured for '{attribute}'.")
+        if column_name.casefold() not in available:
+            raise ValueError(
+                f"Configured column '{column_name}' for '{attribute}' was not found "
+                f"in flat table '{config.source_table}'."
+            )
+        if alias != "filter_date":
+            selected_columns.append(f"{_quote_name(column_name)} AS {_quote_name(alias)}")
+
+    table_name = _quote_table_name(config.source_table)
+    where_clause = ""
+    params: dict[str, object] = {"limit": limit}
+    if date_field:
+        date_column = _quote_name(getattr(config, date_field))
+        if from_date is not None and to_date is not None:
+            where_clause = (
+                f"WHERE {date_column} >= :start_dt "
+                f"AND {date_column} < :end_exclusive"
+            )
+            params["start_dt"] = datetime.combine(from_date, time.min)
+            params["end_exclusive"] = datetime.combine(
+                to_date + timedelta(days=1), time.min
+            )
+        else:
+            where_clause = f"WHERE {date_column} IS NOT NULL"
+        order_clause = f"ORDER BY {date_column} DESC"
+    else:
+        order_clause = ""
+
+    stmt = text(
+        f"SELECT TOP (:limit) {', '.join(selected_columns)} "
+        f"FROM {table_name} {where_clause} {order_clause}"
+    )
+    with engine.connect() as connection:
+        return pd.read_sql(stmt, con=connection, params=params)
+
+
 def _parse_location_as_coordinates(df: pd.DataFrame) -> pd.DataFrame:
     if "device_location" not in df.columns:
         return df
@@ -70,7 +153,11 @@ def _build_flat_map_query(config: AppConfig) -> str:
     table_name = _quote_table_name(config.source_table)
     col_device = _quote_name(config.col_device)
     col_customer = _quote_name(config.col_customer)
-    col_location = _quote_name(config.col_location)
+    location_select = (
+        f"{_quote_name(config.col_location)} AS device_location"
+        if config.col_location.strip()
+        else "CAST(NULL AS nvarchar(255)) AS device_location"
+    )
     col_installed_at = _quote_name(config.col_installed_at)
     col_latitude = _quote_name(config.col_latitude)
     col_longitude = _quote_name(config.col_longitude)
@@ -79,7 +166,7 @@ def _build_flat_map_query(config: AppConfig) -> str:
         SELECT TOP (:limit)
             {col_device} AS device_name,
             {col_customer} AS customer_name,
-            {col_location} AS device_location,
+            {location_select},
             {col_installed_at} AS installed_at,
             CAST({col_latitude} AS float) AS latitude,
             CAST({col_longitude} AS float) AS longitude
@@ -129,10 +216,7 @@ def fetch_install_map_data(
     _ensure_flat_mode(config)
     start_dt, end_dt = _to_datetime_bounds(from_date, to_date)
 
-    if config.custom_map_sql:
-        stmt = text(config.custom_map_sql)
-    else:
-        stmt = text(_build_flat_map_query(config))
+    stmt = text(_build_flat_map_query(config))
 
     with engine.connect() as connection:
         df = pd.read_sql(
@@ -162,10 +246,7 @@ def fetch_install_trend_data(
     _ensure_flat_mode(config)
     start_dt, end_dt = _to_datetime_bounds(from_date, to_date)
 
-    if config.custom_trend_sql:
-        stmt = text(config.custom_trend_sql)
-    else:
-        stmt = text(_build_flat_trend_query(config))
+    stmt = text(_build_flat_trend_query(config))
 
     with engine.connect() as connection:
         df = pd.read_sql(
@@ -201,7 +282,7 @@ def fetch_sales_data(
         f"""
         SELECT
             CAST({col_sales_date} AS date) AS purchase_date,
-            SUM(COALESCE(CAST({col_sales_amount} AS bigint), 0)) AS sales
+            SUM(COALESCE({col_sales_amount}, 0)) AS sales
         FROM {table_name}
         WHERE
             {col_sales_date} >= :start_dt
