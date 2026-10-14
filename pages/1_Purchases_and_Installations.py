@@ -6,6 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from insightquest.analytics import build_installation_periods, build_sales_periods
 from insightquest.data import fetch_flat_table_rows
+from insightquest.exports import render_excel_download
 from insightquest.page_helpers import (
     get_source_context,
     render_analysis_page,
@@ -136,6 +137,10 @@ st.caption(
 )
 series_title = " and ".join(metric_titles[measure][0] for measure in series)
 st.subheader(f"{series_title} by {period.lower()}")
+render_excel_download(
+    {"Period summary": comparison},
+    "purchases-and-installations.xlsx",
+)
 st.line_chart(
     comparison,
     x="period_start",

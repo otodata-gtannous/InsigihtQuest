@@ -6,6 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from insightquest.analytics import build_shipping_lag
 from insightquest.data import fetch_flat_table_rows
+from insightquest.exports import render_excel_download
 from insightquest.page_helpers import (
     get_source_context,
     render_analysis_page,
@@ -80,6 +81,30 @@ if duplicate_keys:
     st.stop()
 
 lags, summary = build_shipping_lag(data)
+render_excel_download(
+    {
+        "Valid shipment lags": lags,
+        "Source records": data.rename(
+            columns={
+                "record_key": "Record key",
+                "shipping_date": "Shipment date",
+                "installed_at": "Installation date",
+            }
+        ),
+        "Summary": pd.DataFrame(
+            [
+                {
+                    "Matched records": summary.matched_rows,
+                    "Missing/invalid dates": summary.missing_date_rows,
+                    "Installation before shipment": summary.negative_lag_rows,
+                    "Median days": summary.median_days,
+                    "90th percentile days": summary.percentile_90_days,
+                }
+            ]
+        ),
+    },
+    "shipping-to-installation.xlsx",
+)
 if summary.matched_rows == 0:
     st.warning("No records have both valid shipment and installation dates.")
     st.metric("Rows with a missing/invalid date", f"{summary.missing_date_rows:,}")

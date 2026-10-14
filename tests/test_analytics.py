@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import unittest
 from datetime import date
+from io import BytesIO
 
 import pandas as pd
+from openpyxl import load_workbook
 
 from insightquest.analytics import (
     build_cohort_installation_rate,
@@ -13,9 +15,38 @@ from insightquest.analytics import (
     build_segment_periods,
     build_shipping_lag,
 )
+from insightquest.exports import build_excel_workbook
 
 
 class AnalyticsTests(unittest.TestCase):
+    def test_excel_export_sanitizes_sheet_names_and_formula_values(self) -> None:
+        workbook_bytes = build_excel_workbook(
+            {
+                "Bad/name?": pd.DataFrame(
+                    {
+                        "value": ["=1+1", "ordinary", "@cmd"],
+                        "infinite_value": [float("inf")] * 3,
+                        "created_at": pd.to_datetime(
+                            ["2025-01-01T00:00:00Z"] * 3, utc=True
+                        ),
+                    }
+                ),
+                "bad/name?": pd.DataFrame({"value": ["second sheet"]}),
+            }
+        )
+        workbook = load_workbook(BytesIO(workbook_bytes), data_only=False)
+
+        self.assertEqual(workbook.sheetnames, ["Bad_name_", "bad_name_ (2)"])
+        self.assertEqual(workbook["Bad_name_"]["A2"].value, "=1+1")
+        self.assertEqual(workbook["Bad_name_"]["A2"].data_type, "s")
+        self.assertEqual(workbook["Bad_name_"]["A3"].value, "ordinary")
+        self.assertEqual(workbook["Bad_name_"]["A4"].value, "@cmd")
+        self.assertIsNone(workbook["Bad_name_"]["B2"].value)
+        self.assertEqual(
+            workbook["Bad_name_"]["C2"].value,
+            pd.Timestamp("2025-01-01"),
+        )
+
     def test_purchase_install_comparison_fills_empty_periods(self) -> None:
         start = date(2025, 1, 1)
         end = date(2025, 1, 3)

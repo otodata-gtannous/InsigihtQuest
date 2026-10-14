@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, timedelta
+from pathlib import Path
 
 import streamlit as st
 from sqlalchemy.engine import Engine
@@ -11,18 +13,29 @@ from insightquest.db import create_db_engine
 
 
 @st.cache_resource
-def get_engine() -> Engine:
+def get_engine(demo_mode: bool) -> Engine | None:
+    if demo_mode:
+        return None
     return create_db_engine(get_config())
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def get_source_columns() -> tuple[str, ...]:
-    return tuple(sorted(fetch_flat_table_columns(get_engine(), get_config())))
+def get_source_columns(demo_mode: bool, demo_csv_path: str) -> tuple[str, ...]:
+    config = replace(
+        get_config(),
+        demo_mode=demo_mode,
+        demo_csv_path=Path(demo_csv_path),
+    )
+    return tuple(sorted(fetch_flat_table_columns(get_engine(demo_mode), config)))
 
 
-def get_source_context() -> tuple[AppConfig, Engine, tuple[str, ...]]:
+def get_source_context() -> tuple[AppConfig, Engine | None, tuple[str, ...]]:
     config = get_config()
-    return config, get_engine(), get_source_columns()
+    return (
+        config,
+        get_engine(config.demo_mode),
+        get_source_columns(config.demo_mode, str(config.demo_csv_path)),
+    )
 
 
 def missing_source_fields(
@@ -65,7 +78,14 @@ def warn_if_row_limit_reached(row_count: int, limit: int) -> None:
 def render_analysis_page(title: str, description: str) -> None:
     st.title(title)
     st.caption(description)
-    st.caption(f"Source: `{get_config().source_table}` (configured flat table)")
+    config = get_config()
+    if config.demo_mode:
+        st.warning(
+            f"DEMO MODE — synthetic data from `{config.demo_csv_path.name}`; "
+            "no database data is used."
+        )
+    else:
+        st.caption(f"Source: `{config.source_table}` (configured flat table)")
 
 
 def render_date_filters(default_days: int = 365) -> tuple[date, date]:

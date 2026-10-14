@@ -6,6 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from insightquest.analytics import build_inventory_risk
 from insightquest.data import fetch_flat_table_rows
+from insightquest.exports import render_excel_download
 from insightquest.page_helpers import (
     get_source_context,
     render_analysis_page,
@@ -139,6 +140,7 @@ st.bar_chart(
     use_container_width=True,
 )
 st.subheader("Risk details")
+render_excel_download({"Inventory risk": risk}, "inventory-risk.xlsx")
 st.dataframe(risk, use_container_width=True, hide_index=True)
 st.caption(
     "Projected on-hand is current on-hand minus daily demand multiplied by "

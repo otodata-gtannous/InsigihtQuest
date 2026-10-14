@@ -18,9 +18,13 @@ configured SQL Server flat table.
 - **Inventory risk**: calculate stockout/overstock indicators from confirmed
   inventory and demand inputs.
 
-Each page checks the configured flat-table schema and reports missing mappings
-or columns. It does not silently substitute another data source or fabricate
-results.
+In database mode, each page checks the configured flat-table schema and reports
+missing mappings or columns. Set `IQ_DEMO_MODE=true` in `.env` to use the
+included synthetic `demo_data.csv` instead; this mode does not connect to or
+read the database. Demo values are fictional and should not be used for business
+decisions. Set `IQ_DEMO_CSV` to select a different CSV file.
+Use the **Export results to Excel** button on a page to download the available
+tables and chart data as an `.xlsx` workbook.
 
 ## 1) Setup
 
@@ -32,6 +36,7 @@ pip install -r requirements.txt
 ```
 
 3. Copy `.env.example` to `.env` and fill the database settings.
+   For a local demo without SQL Server, set `IQ_DEMO_MODE=true`.
 4. Choose auth mode:
    - `IQ_DB_AUTH_MODE=sql` for SQL login (`IQ_DB_USER`/`IQ_DB_PASSWORD`)
    - `IQ_DB_AUTH_MODE=windows` for Windows integrated auth

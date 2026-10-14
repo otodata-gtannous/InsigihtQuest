@@ -4,3 +4,4 @@ SQLAlchemy==2.0.36
 pyodbc==5.1.0
 python-dotenv==1.0.1
 statsmodels==0.14.4
+openpyxl==3.1.5

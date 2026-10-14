@@ -47,9 +47,28 @@ def _ensure_flat_mode(config: AppConfig) -> None:
         )
 
 
-def fetch_flat_table_columns(engine: Engine, config: AppConfig) -> set[str]:
+def _require_engine(engine: Engine | None) -> Engine:
+    if engine is None:
+        raise ValueError("A database engine is required when demo mode is disabled.")
+    return engine
+
+
+def _read_demo_csv(config: AppConfig) -> pd.DataFrame:
+    if not config.demo_csv_path.is_file():
+        raise FileNotFoundError(
+            f"Demo CSV '{config.demo_csv_path}' does not exist. "
+            "Set IQ_DEMO_CSV to a valid CSV path or disable IQ_DEMO_MODE."
+        )
+    return pd.read_csv(config.demo_csv_path)
+
+
+def fetch_flat_table_columns(engine: Engine | None, config: AppConfig) -> set[str]:
     """Return column names from the configured flat table without reading rows."""
     _ensure_flat_mode(config)
+    if config.demo_mode:
+        return set(_read_demo_csv(config).columns)
+    if engine is None:
+        raise ValueError("A database engine is required when demo mode is disabled.")
     parts = [part.strip() for part in config.source_table.split(".") if part.strip()]
     if len(parts) == 1:
         schema, table = "dbo", parts[0]
@@ -65,7 +84,7 @@ def fetch_flat_table_columns(engine: Engine, config: AppConfig) -> set[str]:
 
 
 def fetch_flat_table_rows(
-    engine: Engine,
+    engine: Engine | None,
     config: AppConfig,
     fields: dict[str, str],
     date_field: str | None = None,
@@ -83,6 +102,44 @@ def fetch_flat_table_rows(
         raise ValueError("Both date bounds must be provided together.")
     if from_date is not None and from_date > to_date:
         raise ValueError("From date must be earlier than or equal to To date.")
+
+    if config.demo_mode:
+        frame = _read_demo_csv(config)
+        column_names = {name.casefold(): name for name in frame.columns}
+        configured = dict(fields)
+        if date_field:
+            configured["filter_date"] = date_field
+
+        selected = {}
+        for alias, attribute in configured.items():
+            column_name = getattr(config, attribute, "")
+            if not column_name:
+                raise ValueError(f"No column is configured for '{attribute}'.")
+            actual_name = column_names.get(column_name.casefold())
+            if actual_name is None:
+                raise ValueError(
+                    f"Configured demo column '{column_name}' for '{attribute}' "
+                    f"was not found in '{config.demo_csv_path.name}'."
+                )
+            if alias != "filter_date":
+                selected[alias] = actual_name
+
+        if date_field:
+            date_column = column_names[getattr(config, date_field).casefold()]
+            dates = pd.to_datetime(frame[date_column], errors="coerce")
+            frame = frame.loc[dates.notna()].copy()
+            frame[date_column] = dates.loc[dates.notna()]
+            if from_date is not None and to_date is not None:
+                start = pd.Timestamp(from_date)
+                end = pd.Timestamp(to_date) + pd.Timedelta(days=1)
+                frame = frame.loc[
+                    (frame[date_column] >= start) & (frame[date_column] < end)
+                ]
+            frame = frame.sort_values(date_column, ascending=False)
+
+        return frame[list(selected.values())].rename(
+            columns={actual: alias for alias, actual in selected.items()}
+        ).head(limit).reset_index(drop=True)
 
     available = {name.casefold() for name in fetch_flat_table_columns(engine, config)}
     configured = dict(fields)
@@ -126,6 +183,7 @@ def fetch_flat_table_rows(
         f"SELECT TOP (:limit) {', '.join(selected_columns)} "
         f"FROM {table_name} {where_clause} {order_clause}"
     )
+    engine = _require_engine(engine)
     with engine.connect() as connection:
         return pd.read_sql(stmt, con=connection, params=params)
 
@@ -207,17 +265,40 @@ def _build_flat_territory_query(config: AppConfig) -> str:
 
 
 def fetch_install_map_data(
-    engine: Engine,
+    engine: Engine | None,
     config: AppConfig,
     from_date: date,
     to_date: date,
     limit: int,
 ) -> pd.DataFrame:
     _ensure_flat_mode(config)
+    if config.demo_mode:
+        fields = {
+            "device_name": "col_device",
+            "customer_name": "col_customer",
+            "installed_at": "col_installed_at",
+            "latitude": "col_latitude",
+            "longitude": "col_longitude",
+        }
+        if config.col_location:
+            fields["device_location"] = "col_location"
+        df = fetch_flat_table_rows(
+            engine, config, fields, "col_installed_at", from_date, to_date, limit
+        )
+        if "device_location" not in df.columns:
+            df["device_location"] = pd.NA
+        df = _parse_location_as_coordinates(df)
+        df["latitude"] = pd.to_numeric(df["latitude"], errors="coerce")
+        df["longitude"] = pd.to_numeric(df["longitude"], errors="coerce")
+        df = df.dropna(subset=["latitude", "longitude"]).copy()
+        return df[
+            df["latitude"].between(-90, 90) & df["longitude"].between(-180, 180)
+        ]
     start_dt, end_dt = _to_datetime_bounds(from_date, to_date)
 
     stmt = text(_build_flat_map_query(config))
 
+    engine = _require_engine(engine)
     with engine.connect() as connection:
         df = pd.read_sql(
             stmt,
@@ -237,17 +318,28 @@ def fetch_install_map_data(
 
 
 def fetch_install_trend_data(
-    engine: Engine,
+    engine: Engine | None,
     config: AppConfig,
     from_date: date,
     to_date: date,
     limit: int,
 ) -> pd.DataFrame:
     _ensure_flat_mode(config)
+    if config.demo_mode:
+        return fetch_flat_table_rows(
+            engine,
+            config,
+            {"installed_at": "col_installed_at", "customer_name": "col_customer"},
+            "col_installed_at",
+            from_date,
+            to_date,
+            limit,
+        )
     start_dt, end_dt = _to_datetime_bounds(from_date, to_date)
 
     stmt = text(_build_flat_trend_query(config))
 
+    engine = _require_engine(engine)
     with engine.connect() as connection:
         df = pd.read_sql(
             stmt,
@@ -267,12 +359,28 @@ def fetch_install_trend_data(
 
 
 def fetch_sales_data(
-    engine: Engine,
+    engine: Engine | None,
     config: AppConfig,
     from_date: date,
     to_date: date,
 ) -> pd.DataFrame:
     _ensure_flat_mode(config)
+    if config.demo_mode:
+        data = fetch_flat_table_rows(
+            engine,
+            config,
+            {"purchase_date": "col_sales_date", "sales": "col_sales_amount"},
+            "col_sales_date",
+            from_date,
+            to_date,
+        )
+        data["sales"] = pd.to_numeric(data["sales"], errors="coerce").fillna(0)
+        return (
+            data.groupby("purchase_date", as_index=False)["sales"]
+            .sum()
+            .sort_values("purchase_date")
+            .reset_index(drop=True)
+        )
     start_dt = datetime.combine(from_date, time.min)
     end_exclusive = datetime.combine(to_date + timedelta(days=1), time.min)
     table_name = _quote_table_name(config.source_table)
@@ -292,6 +400,7 @@ def fetch_sales_data(
         """
     )
 
+    engine = _require_engine(engine)
     with engine.connect() as connection:
         return pd.read_sql(
             stmt,
@@ -301,16 +410,32 @@ def fetch_sales_data(
 
 
 def fetch_install_territory_trend_data(
-    engine: Engine,
+    engine: Engine | None,
     config: AppConfig,
     from_date: date,
     to_date: date,
     limit: int,
 ) -> pd.DataFrame:
     _ensure_flat_mode(config)
+    if config.demo_mode:
+        data = fetch_flat_table_rows(
+            engine,
+            config,
+            {"installed_at": "col_installed_at", "territory_name": "col_territory"},
+            "col_installed_at",
+            from_date,
+            to_date,
+            limit,
+        )
+        data["installed_at"] = pd.to_datetime(data["installed_at"], errors="coerce")
+        data["territory_name"] = (
+            data["territory_name"].fillna("Unknown Territory").astype(str)
+        )
+        return data.dropna(subset=["installed_at"]).reset_index(drop=True)
     start_dt, end_dt = _to_datetime_bounds(from_date, to_date)
     stmt = text(_build_flat_territory_query(config))
 
+    engine = _require_engine(engine)
     with engine.connect() as connection:
         df = pd.read_sql(
             stmt,
@@ -328,12 +453,43 @@ def fetch_install_territory_trend_data(
 
 
 def fetch_data_source_diagnostics(
-    engine: Engine,
+    engine: Engine | None,
     config: AppConfig,
     from_date: date,
     to_date: date,
 ) -> pd.DataFrame:
     _ensure_flat_mode(config)
+    if config.demo_mode:
+        data = fetch_flat_table_rows(
+            engine,
+            config,
+            {
+                "customer_name": "col_customer",
+                "installed_at": "col_installed_at",
+                "latitude": "col_latitude",
+                "longitude": "col_longitude",
+            },
+            "col_installed_at",
+            from_date,
+            to_date,
+        )
+        return pd.DataFrame(
+            [
+                {
+                    "total_devices_in_range": len(data),
+                    "with_coordinates": int(
+                        (
+                            data["latitude"].notna()
+                            & data["longitude"].notna()
+                        ).sum()
+                    ),
+                    "with_customer": int(data["customer_name"].notna().sum()),
+                    "from_initial_install_date": len(data),
+                    "from_detected_install_date": 0,
+                    "from_tanksensor_created_date": 0,
+                }
+            ]
+        )
     start_dt, end_dt = _to_datetime_bounds(from_date, to_date)
     table_name = _quote_table_name(config.source_table)
     col_customer = _quote_name(config.col_customer)
@@ -353,5 +509,6 @@ def fetch_data_source_diagnostics(
         WHERE {col_installed_at} BETWEEN :start_dt AND :end_dt
         """
     )
+    engine = _require_engine(engine)
     with engine.connect() as connection:
         return pd.read_sql(stmt, con=connection, params={"start_dt": start_dt, "end_dt": end_dt})

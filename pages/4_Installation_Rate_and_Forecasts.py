@@ -12,6 +12,7 @@ from insightquest.analytics import (
     project_trend,
 )
 from insightquest.data import fetch_flat_table_rows
+from insightquest.exports import render_excel_download
 from insightquest.page_helpers import (
     get_source_context,
     render_analysis_page,
@@ -50,6 +51,8 @@ except (SQLAlchemyError, ValueError) as ex:
     st.exception(ex)
     st.stop()
 
+export_sheets: dict[str, pd.DataFrame] = {}
+
 
 def render_forecast(title: str, history: pd.DataFrame, metric_name: str, periods: int) -> None:
     st.subheader(title)
@@ -75,6 +78,9 @@ def render_forecast(title: str, history: pd.DataFrame, metric_name: str, periods
     historical = forecast.history.assign(series="Historical")
     projected = forecast.projection.assign(series="Projected")
     chart = pd.concat([historical, projected], ignore_index=True)
+    export_sheets[f"{metric_name} forecast"] = chart
+    if not backtest.details.empty:
+        export_sheets[f"{metric_name} backtest"] = backtest.details
     st.line_chart(chart, x="period_start", y="installs", color="series", use_container_width=True)
     metrics = st.columns(4)
     metrics[0].metric("Forecast model", backtest.model_name)
@@ -102,7 +108,6 @@ def render_forecast(title: str, history: pd.DataFrame, metric_name: str, periods
             )
         else:
             st.caption("Not enough backtest history to estimate a forecast envelope.")
-
 
 installation_requirements = {"Installation date": "col_installed_at"}
 installation_ready = show_source_readiness(
@@ -200,6 +205,7 @@ if show_source_readiness(config, source_columns, rate_requirements):
         if cohorts.empty:
             st.info("No valid shipped-unit denominator is available in the selected range.")
         else:
+            export_sheets["Shipment cohort rates"] = cohorts
             st.line_chart(
                 cohorts,
                 x="cohort_month",
@@ -252,6 +258,7 @@ if show_source_readiness(config, source_columns, market_requirements):
         if market_monthly.empty:
             st.info("No valid market indicator values are available for this period.")
         else:
+            export_sheets["Market indicator"] = market_monthly
             if purchase_history_for_market is None:
                 st.line_chart(
                     market_monthly,
@@ -270,6 +277,7 @@ if show_source_readiness(config, source_columns, market_requirements):
                 aligned = aligned.dropna(
                     subset=["purchase_measure", "market_indicator"]
                 )
+                export_sheets["Market purchase comparison"] = aligned
                 if len(aligned) >= 2:
                     purchase_base = aligned["purchase_measure"].iloc[0]
                     market_base = aligned["market_indicator"].iloc[0]
@@ -305,3 +313,5 @@ if show_source_readiness(config, source_columns, market_requirements):
                 "The market comparison is descriptive and does not imply causation "
                 "or feed the purchase forecast."
             )
+
+render_excel_download(export_sheets, "installation-rate-and-forecasts.xlsx")

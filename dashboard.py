@@ -24,8 +24,9 @@ from insightquest.data import (
     fetch_install_territory_trend_data,
     fetch_install_trend_data,
 )
-from insightquest.db import create_db_engine
+from insightquest.exports import render_excel_download
 from insightquest.page_helpers import (
+    get_engine,
     get_source_columns,
     missing_source_fields,
     show_source_readiness,
@@ -37,7 +38,7 @@ st.set_page_config(page_title="InsightQuest", layout="wide")
 @st.cache_resource
 def _load_engine():
     config = get_config()
-    return create_db_engine(config)
+    return get_engine(config.demo_mode)
 
 
 @st.cache_data(ttl=300)
@@ -107,8 +108,15 @@ def main() -> None:
         return
 
     config = get_config()
+    if config.demo_mode:
+        st.warning(
+            f"DEMO MODE — synthetic data from `{config.demo_csv_path.name}`; "
+            "no database data is used."
+        )
     try:
-        source_columns = get_source_columns()
+        source_columns = get_source_columns(
+            config.demo_mode, str(config.demo_csv_path)
+        )
     except (SQLAlchemyError, ValueError) as ex:
         st.error("Unable to inspect the configured flat-table source.")
         st.exception(ex)
@@ -244,6 +252,10 @@ def main() -> None:
                 .reset_index()
             )
             st.subheader("Top install clusters")
+            render_excel_download(
+                {"Top install clusters": summary, "Map clusters": clustered},
+                "insightquest-install-map.xlsx",
+            )
             st.dataframe(summary, use_container_width=True)
 
     with sales_tab:
@@ -291,6 +303,13 @@ def main() -> None:
                 )
 
                 st.subheader("Device install totals by territory")
+                render_excel_download(
+                    {
+                        "Install totals by territory": territory_totals,
+                        "Territory trend": territory_series,
+                    },
+                    "insightquest-territory-trends.xlsx",
+                )
                 st.bar_chart(
                     territory_totals,
                     x="territory_name",
@@ -341,6 +360,9 @@ def main() -> None:
             chart_df = trend_chart_df
 
         st.subheader(f"Install trend by {trend_period.lower()}")
+        export_sheets = {"Trend and projection": chart_df}
+        if not backtest.details.empty:
+            export_sheets["Forecast backtest"] = backtest.details
         st.line_chart(
             chart_df,
             x="period_start",
@@ -376,6 +398,7 @@ def main() -> None:
             .reset_index()
         )
         st.subheader("Selected customer install totals")
+        export_sheets["Customer totals"] = customer_breakdown
         st.dataframe(customer_breakdown, use_container_width=True)
 
         seasonality_df = build_monthly_seasonality(
@@ -386,6 +409,7 @@ def main() -> None:
         if seasonality_df.empty:
             st.info("No seasonal data available for the selected customers/date range.")
         else:
+            export_sheets["Monthly seasonality"] = seasonality_df
             st.bar_chart(
                 seasonality_df,
                 x="month_name",
@@ -399,6 +423,10 @@ def main() -> None:
             chart_df.sort_values(["period_start", "series"]).reset_index(drop=True),
             use_container_width=True,
         )
+        export_sheets["Trend and projection"] = chart_df.sort_values(
+            ["period_start", "series"]
+        ).reset_index(drop=True)
+        render_excel_download(export_sheets, "insightquest-install-forecast.xlsx")
 
     with diag_tab:
         if not diagnostics_ready:
@@ -450,6 +478,13 @@ def main() -> None:
             lambda value: f"{(value / total * 100) if total else 0:.1f}%"
         )
         st.dataframe(source_df, use_container_width=True)
+        render_excel_download(
+            {
+                "Diagnostics": diagnostics,
+                "Install date sources": source_df,
+            },
+            "insightquest-data-diagnostics.xlsx",
+        )
 
 
 if __name__ == "__main__":

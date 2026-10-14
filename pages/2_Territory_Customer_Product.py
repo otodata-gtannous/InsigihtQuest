@@ -6,6 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from insightquest.analytics import build_segment_periods
 from insightquest.data import fetch_flat_table_rows
+from insightquest.exports import render_excel_download
 from insightquest.page_helpers import (
     get_source_context,
     render_analysis_page,
@@ -50,6 +51,7 @@ dimensions = [
     ("Product type", "col_product_type"),
 ]
 available_dimensions: list[tuple[str, str]] = []
+export_sheets: dict[str, pd.DataFrame] = {}
 for label, attribute in dimensions:
     st.subheader(label)
     requirements = {
@@ -86,6 +88,8 @@ for label, attribute in dimensions:
         .sort_values("count", ascending=False)
     )
     available_dimensions.append((label, attribute))
+    export_sheets[f"{label} by period"] = series
+    export_sheets[f"{label} totals"] = totals
     left, right = st.columns([2, 1])
     with left:
         st.line_chart(
@@ -106,6 +110,7 @@ if not available_dimensions:
         "to fields in the flat table."
     )
 else:
+    render_excel_download(export_sheets, "territory-customer-product.xlsx")
     st.caption(
         "These are installation-row counts. Customer-size values are shown as "
         "stored in the source; no size bands or customer classifications are inferred."
