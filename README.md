@@ -26,6 +26,18 @@ decisions. Set `IQ_DEMO_CSV` to select a different CSV file.
 Use the **Export results to Excel** button on a page to download the available
 tables and chart data as an `.xlsx` workbook.
 
+## How it answers the six questions
+
+1. **Purchase/install peaks and lows:** daily, weekly, or monthly totals ranked by period.
+2. **Territory, customer size, and product differences:** installation counts grouped by the configured dimensions; no segments are inferred.
+3. **Shipping-to-installation delay:** per-record elapsed days, median, and 90th percentile; invalid or negative delays are excluded.
+4. **Monthly installation rate:** installed eligible units divided by shipped eligible units for each shipment-month cohort.
+5. **Purchase forecasts versus markets:** separate purchase and installation forecasts use Holt-Winters smoothing, with a seasonal-naive fallback and rolling backtests. Market comparison is descriptive, not causal.
+6. **Stockout/overstock thresholds:** rule-based checks compare projected stock against configured reorder and maximum levels.
+
+**AI used:** forecasting uses statistical time-series methods; the other analyses are
+aggregations or explicit business rules. The app does not use generative AI or an LLM.
+
 ## 1) Setup
 
 1. Create and activate a Python virtual environment.
