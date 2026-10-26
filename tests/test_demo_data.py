@@ -27,8 +27,8 @@ class DemoDataTests(unittest.TestCase):
             col_location="DeviceLocation",
             col_installed_at="TankInstallDate",
             col_customer="CompanyId",
-            col_latitude="DeviceLat",
-            col_longitude="DeviceLong",
+            col_latitude="Latitude",
+            col_longitude="Longitude",
             col_territory="Territory",
             col_sales_date="PurchaseDate",
             col_sales_amount="PurchaseAmount",
@@ -49,7 +49,7 @@ class DemoDataTests(unittest.TestCase):
 
     def test_demo_schema_and_mapped_rows_load_without_database_engine(self) -> None:
         columns = fetch_flat_table_columns(None, self.config)
-        self.assertIn("DeviceLat", columns)
+        self.assertIn("Latitude", columns)
         self.assertIn("PurchaseAmount", columns)
 
         rows = fetch_flat_table_rows(

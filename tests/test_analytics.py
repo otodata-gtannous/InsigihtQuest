@@ -11,6 +11,7 @@ from insightquest.analytics import (
     build_cohort_installation_rate,
     build_installation_periods,
     build_inventory_risk,
+    build_map_clusters,
     build_purchase_install_comparison,
     build_segment_periods,
     build_shipping_lag,
@@ -19,6 +20,40 @@ from insightquest.exports import build_excel_workbook
 
 
 class AnalyticsTests(unittest.TestCase):
+    def test_map_clusters_support_numeric_device_ids(self) -> None:
+        data = pd.DataFrame(
+            {
+                "device_name": [101, 102],
+                "customer_name": [1, 2],
+                "latitude": [45.501, 45.502],
+                "longitude": [-73.561, -73.562],
+                "installed_at": pd.to_datetime(["2025-01-01", "2025-01-02"]),
+            }
+        )
+
+        result = build_map_clusters(data, 2)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result.iloc[0]["installs"], 2)
+        self.assertEqual(result.iloc[0]["customers"], 2)
+        self.assertEqual(set(result.iloc[0]["top_devices"].split(", ")), {"101", "102"})
+        self.assertGreater(result.iloc[0]["radius"], 0)
+
+    def test_map_clusters_count_installations_without_device_labels(self) -> None:
+        data = pd.DataFrame(
+            {
+                "device_name": [None],
+                "latitude": [45.5],
+                "longitude": [-73.56],
+                "installed_at": pd.to_datetime(["2025-01-01"]),
+            }
+        )
+
+        result = build_map_clusters(data, 2)
+
+        self.assertEqual(result.iloc[0]["installs"], 1)
+        self.assertEqual(result.iloc[0]["top_devices"], "Unknown")
+
     def test_excel_export_sanitizes_sheet_names_and_formula_values(self) -> None:
         workbook_bytes = build_excel_workbook(
             {

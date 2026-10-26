@@ -52,6 +52,10 @@ class AppConfig:
     col_replenishment_days: str
     col_reorder_point: str
     col_max_stock: str
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
+    ai_allow_external_data: bool = False
+    ai_db_read_only_confirmed: bool = False
 
 
 def get_config() -> AppConfig:
@@ -83,26 +87,33 @@ def get_config() -> AppConfig:
         source_mode=os.getenv("IQ_SOURCE_MODE", "flat-table"),
         source_table=os.getenv("IQ_SOURCE_TABLE", "dbo.Insight Project"),
         col_device=mapped_column("IQ_COL_DEVICE", "Id", "Id"),
-        col_location=mapped_column("IQ_COL_LOCATION", demo_default="DeviceLocation"),
+        col_location=mapped_column("IQ_COL_LOCATION"),
         col_installed_at=mapped_column("IQ_COL_INSTALLED_AT", "TankInstallDate", "TankInstallDate"),
         col_customer=mapped_column("IQ_COL_CUSTOMER", "CompanyId", "CompanyId"),
-        col_latitude=mapped_column("IQ_COL_LATITUDE", "DeviceLat", "DeviceLat"),
-        col_longitude=mapped_column("IQ_COL_LONGITUDE", "DeviceLong", "DeviceLong"),
-        col_territory=mapped_column("IQ_COL_TERRITORY", demo_default="Territory"),
+        col_latitude=mapped_column("IQ_COL_LATITUDE", "Latitude", "Latitude"),
+        col_longitude=mapped_column("IQ_COL_LONGITUDE", "Longitude", "Longitude"),
+        col_territory=mapped_column("IQ_COL_TERRITORY"),
         col_sales_date=mapped_column("IQ_COL_SALES_DATE", "PurchaseDate", "PurchaseDate"),
-        col_sales_amount=mapped_column("IQ_COL_SALES_AMOUNT", demo_default="PurchaseAmount"),
-        col_shipped_at=mapped_column("IQ_COL_SHIPPED_AT", demo_default="ShipmentDate"),
+        col_sales_amount=mapped_column("IQ_COL_SALES_AMOUNT"),
+        col_shipped_at=mapped_column("IQ_COL_SHIPPED_AT"),
         col_shipping_key=mapped_column("IQ_COL_SHIPPING_KEY", "Id", "Id"),
-        col_customer_size=mapped_column("IQ_COL_CUSTOMER_SIZE", demo_default="CustomerSize"),
+        col_customer_size=mapped_column("IQ_COL_CUSTOMER_SIZE"),
         col_product_type=mapped_column("IQ_COL_PRODUCT_TYPE", "DeviceType", "DeviceType"),
-        col_rate_denominator=mapped_column("IQ_COL_RATE_DENOMINATOR", demo_default="EligibleUnits"),
-        col_market_indicator=mapped_column("IQ_COL_MARKET_INDICATOR", demo_default="MarketIndex"),
-        col_market_indicator_at=mapped_column("IQ_COL_MARKET_INDICATOR_AT", demo_default="MarketDate"),
-        col_inventory_on_hand=mapped_column("IQ_COL_INVENTORY_ON_HAND", demo_default="InventoryOnHand"),
-        col_inventory_demand=mapped_column("IQ_COL_INVENTORY_DEMAND", demo_default="InventoryDailyDemand"),
-        col_inventory_as_of=mapped_column("IQ_COL_INVENTORY_AS_OF", demo_default="InventoryAsOf"),
-        col_inventory_item=mapped_column("IQ_COL_INVENTORY_ITEM", demo_default="InventoryItem"),
-        col_replenishment_days=mapped_column("IQ_COL_REPLENISHMENT_DAYS", demo_default="ReplenishmentDays"),
-        col_reorder_point=mapped_column("IQ_COL_REORDER_POINT", demo_default="ReorderPoint"),
-        col_max_stock=mapped_column("IQ_COL_MAX_STOCK", demo_default="MaxStock"),
+        col_rate_denominator=mapped_column("IQ_COL_RATE_DENOMINATOR"),
+        col_market_indicator=mapped_column("IQ_COL_MARKET_INDICATOR"),
+        col_market_indicator_at=mapped_column("IQ_COL_MARKET_INDICATOR_AT"),
+        col_inventory_on_hand=mapped_column("IQ_COL_INVENTORY_ON_HAND"),
+        col_inventory_demand=mapped_column("IQ_COL_INVENTORY_DEMAND"),
+        col_inventory_as_of=mapped_column("IQ_COL_INVENTORY_AS_OF"),
+        col_inventory_item=mapped_column("IQ_COL_INVENTORY_ITEM"),
+        col_replenishment_days=mapped_column("IQ_COL_REPLENISHMENT_DAYS"),
+        col_reorder_point=mapped_column("IQ_COL_REORDER_POINT"),
+        col_max_stock=mapped_column("IQ_COL_MAX_STOCK"),
+        openai_api_key=(
+            os.getenv("IQ_OPENAI_API_KEY", "").strip()
+            or os.getenv("OPENAI_API_KEY", "").strip()
+        ),
+        openai_model=os.getenv("IQ_OPENAI_MODEL", "").strip() or "gpt-4o-mini",
+        ai_allow_external_data=_as_bool(os.getenv("IQ_AI_ALLOW_EXTERNAL_DATA"), default=False),
+        ai_db_read_only_confirmed=_as_bool(os.getenv("IQ_AI_DB_READ_ONLY_CONFIRMED"), default=False),
     )

@@ -430,7 +430,7 @@ def build_map_clusters(map_df: pd.DataFrame, rounding_decimals: int) -> pd.DataF
     grouped = (
         frame.groupby(["cluster_lat", "cluster_lon"], dropna=False)
         .agg(
-            installs=("device_name", "count"),
+            installs=("device_name", "size"),
             customers=("customer_name", "nunique"),
             latest_install=("installed_at", "max"),
         )
@@ -449,13 +449,14 @@ def build_map_clusters(map_df: pd.DataFrame, rounding_decimals: int) -> pd.DataF
         top_devices.groupby(["cluster_lat", "cluster_lon"])
         .head(3)
         .groupby(["cluster_lat", "cluster_lon"])["device_name"]
-        .apply(lambda values: ", ".join(values.tolist()))
+        .apply(lambda values: ", ".join(values.astype(str).tolist()))
         .rename("top_devices")
         .reset_index()
     )
     top_devices = top_devices.rename(columns={"cluster_lat": "lat", "cluster_lon": "lon"})
 
     clustered = grouped.merge(top_devices, on=["lat", "lon"], how="left")
+    clustered["top_devices"] = clustered["top_devices"].fillna("Unknown")
     clustered["radius"] = np.sqrt(clustered["installs"]).clip(lower=1) * 250
     return clustered.sort_values("installs", ascending=False)
 

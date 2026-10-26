@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+from typing import Protocol
 from urllib.parse import quote_plus
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 
 from insightquest.config import AppConfig
 
 
-def create_db_engine(config: AppConfig) -> Engine:
+class _QueryConnection(Protocol):
+    timeout: int
+
+
+def create_db_engine(config: AppConfig, *, query_timeout_seconds: int | None = None) -> Engine:
+    if query_timeout_seconds is not None and query_timeout_seconds < 1:
+        raise ValueError("Query timeout must be positive.")
     auth_mode = (config.db_auth_mode or "auto").strip().lower()
     if auth_mode not in {"auto", "sql", "windows"}:
         raise ValueError("IQ_DB_AUTH_MODE must be one of: auto, sql, windows.")
@@ -38,8 +45,14 @@ def create_db_engine(config: AppConfig) -> Engine:
         connection_parts.extend([f"UID={config.db_user}", f"PWD={config.db_password}"])
 
     raw_connection = ";".join(connection_parts) + ";"
-    return create_engine(
+    engine = create_engine(
         f"mssql+pyodbc:///?odbc_connect={quote_plus(raw_connection)}",
         pool_pre_ping=True,
     )
-
+    if query_timeout_seconds is not None:
+        @event.listens_for(engine, "connect")
+        def set_query_timeout(
+            connection: _QueryConnection, connection_record: object,
+        ) -> None:
+            connection.timeout = query_timeout_seconds
+    return engine

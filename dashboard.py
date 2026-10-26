@@ -209,17 +209,16 @@ def main() -> None:
             if clustered.empty:
                 st.warning("No cluster points available from the current map data.")
             else:
-                viewport = pdk.ViewState(
-                    latitude=float(clustered["lat"].mean()),
-                    longitude=float(clustered["lon"].mean()),
-                    zoom=3.5,
-                    pitch=30,
-                )
+                viewport = pdk.data_utils.compute_view(clustered[["lon", "lat"]])
+                viewport.zoom = min(viewport.zoom, 12)
+                viewport.pitch = 0
                 layer = pdk.Layer(
                     "ScatterplotLayer",
                     data=clustered,
                     get_position="[lon, lat]",
                     get_radius="radius",
+                    radius_min_pixels=5,
+                    radius_max_pixels=40,
                     get_fill_color=[0, 128, 255, 180],
                     pickable=True,
                 )
