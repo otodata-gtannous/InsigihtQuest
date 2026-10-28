@@ -26,6 +26,9 @@ for what each question needs from the flat table, and
 The app opens on a **Home** guide with one card per question (with a
 Ready / Partial / Not available badge based on your column mappings). Pages are
 grouped in the sidebar; use the language selector for English or French (fr-CA).
+The app uses a dark theme by default (`.streamlit/config.toml`). Page URLs are
+readable: `/peaks-and-lows`, `/market-gaps`, `/ship-to-install`, `/install-rate`,
+`/buying-outlook`, `/stock-watch`, `/install-map`, and `/ask`.
 
 - **Home**: the six questions with a live one-sentence answer each, headline KPIs, and links to each page.
 - **Peaks & Lows** (Question 1): purchases and installations by day, week, or month
@@ -49,27 +52,33 @@ grouped in the sidebar; use the language selector for English or French (fr-CA).
   window).
 - **Install Map**: the installation map, territory trend, and
   source diagnostics.
-- **Ask the data**: choose private analysis or opt-in guided aggregate queries. Set
-  `IQ_OPENAI_API_KEY` (or `OPENAI_API_KEY`) and optionally `IQ_OPENAI_MODEL`
-  (default `gpt-4o-mini`, with structured-output support) in `.env`.
+- **Ask the data** (chat): a chat widget at the bottom right of every page, also
+  available full-screen at `/ask`. It needs no setup: without an OpenAI key,
+  questions are matched locally to the supported analyses and each page offers
+  suggestion chips; answers show the number first, a one-line scope note, a small
+  table, and the plan under "Show how this was computed". Answers use the shared
+  date range. Optionally set
+  `IQ_OPENAI_API_KEY` (or `OPENAI_API_KEY`) and `IQ_OPENAI_MODEL`
+  (default `gpt-4o-mini`, with structured-output support) in `.env` to improve
+  question interpretation.
   In the default **Private** mode, the server extracts fixed analysis labels from the question locally. Only
   those labels, static instructions, and a fixed response schema go to OpenAI.
   Questions, history, source schema, records, sample rows, IDs, coordinates,
   aggregates, and results are not sent. Labels still disclose the general
   analysis topic; use an internal model if even that must remain confidential.
   The model has no database tools and cannot supply SQL. Its response is
-  validated against a fixed allowlist, then the user confirms an analysis.
+  validated against a fixed allowlist before anything runs.
   Calculations and answer formatting run locally, with no second LLM call.
-  Missing keys, ambiguous questions, and planner failures allow explicit manual
-  selection; failures are shown rather than presented as model answers.
+  Missing keys, ambiguous questions, and planner failures fall back to the
+  closest supported question; failures are shown rather than presented as model answers.
   Available analyses include overview, monthly purchases/installations, counts
   by company/type, installation delay, pending installations, and coordinate
   coverage. Each question is independent: arbitrary filters in question text,
-  top-N limits, and follow-up references are not applied. Review the plan and
-  set inclusive purchase/install date filters in the local controls.
-  Results identify their scope, count rows unless labeled distinct, and warn
-  when the source row limit is reached. Rows/results are not globally cached
-  by the chat page; displayed results are held in the user's Streamlit session.
+  top-N limits, and follow-up references are not applied.
+  Results identify their scope and count rows unless labeled distinct.
+  Rows/results are not globally cached
+  by the chat; displayed results and history are held in the user's Streamlit
+  session and are lost when the page is reloaded.
   This does not add authentication or tenant authorization: use only within
   an authorized deployment and restrict the database account/source accordingly.
   Do not enable request-body logging or external tracing of questions/results
@@ -77,8 +86,10 @@ grouped in the sidebar; use the language selector for English or French (fr-CA).
 
 ### Guided aggregate queries (opt-in)
 
-Set `IQ_AI_ALLOW_EXTERNAL_DATA=true` and restart Streamlit, then choose
-**Guided (approved external sharing)** on **Ask the data**. Keep this disabled
+Set `IQ_AI_ALLOW_EXTERNAL_DATA=true` and restart Streamlit. The chat then shows
+two opt-in toggles, both off by default: **Let the AI interpret my question**
+(sends the question text to OpenAI) and **Let the AI explain results** (sends
+aggregated numbers to OpenAI). Keep this disabled
 unless your organization permits sharing questions and aggregates with OpenAI.
 For database mode, configure the `IQ_DB_*` credentials as a SELECT-only account
 restricted to the approved source table/view, then set
@@ -86,16 +97,17 @@ restricted to the approved source table/view, then set
 permission enforcement. Do not use `sa` or another write-capable account.
 Synthetic demo mode does not need database credentials or this attestation.
 
-1. Review your question, remove confidential values/identifiers, and approve
-   sending it to OpenAI. The planner also receives the current date, static
-   instructions, and a fixed schema, but no source schema, source records,
-   sample rows, results, or history.
-2. Inspect the returned JSON plan and explicitly run it locally. The server
+1. With interpretation enabled, review your question, remove confidential
+   values/identifiers, and send it to OpenAI. The planner also receives the
+   current date, static instructions, and a fixed schema, but no source schema,
+   source records, sample rows, results, or history.
+2. Review the returned plan ("The AI read your question as...") and run it
+   locally with **Run this analysis**. The server
    independently validates every plan field. No model-generated SQL or code
    is accepted; only fixed operations and administrator-mapped fields are used.
-3. Inspect the local result and the exact optional outbound aggregate payload.
-   A separate approval sends that payload for an AI explanation. The question
-   is not resent. Results remain usable without this second call.
+3. Inspect the local result and the exact outbound aggregate payload ("What would
+   be sent to OpenAI"). With explanation enabled, **Explain with AI** sends that
+   payload. The question is not resent. Results remain usable without this call.
 
 Supported metrics are purchase/installation **row counts**, purchased rows
 without a valid installation date, and nonnegative purchase-to-install delay
@@ -296,7 +308,9 @@ the app from the repository root:
 docker compose up --build -d
 ```
 
-Open `http://localhost:8501`. To stop the app:
+Open `http://localhost:8501`. The image is built from the current code, so run
+`docker compose up --build -d` again after pulling changes; a running container
+keeps serving the old build. To stop the app:
 
 ```bash
 docker compose down
