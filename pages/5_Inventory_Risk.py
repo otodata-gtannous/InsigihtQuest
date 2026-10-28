@@ -8,6 +8,7 @@ from insightquest.analytics import build_inventory_risk
 from insightquest.data import fetch_flat_table_rows
 from insightquest.exports import render_excel_download
 from insightquest.page_helpers import (
+    app_page_icon,
     get_source_context,
     render_analysis_page,
     render_date_filters,
@@ -15,7 +16,11 @@ from insightquest.page_helpers import (
     warn_if_row_limit_reached,
 )
 
-st.set_page_config(page_title="Inventory Risk | InsightQuest", layout="wide")
+st.set_page_config(
+    page_title="Inventory Risk | InsightQuest",
+    page_icon=app_page_icon(),
+    layout="wide",
+)
 
 render_analysis_page(
     "Inventory risk",

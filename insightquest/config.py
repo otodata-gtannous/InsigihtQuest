@@ -56,10 +56,15 @@ class AppConfig:
     openai_model: str = "gpt-4o-mini"
     ai_allow_external_data: bool = False
     ai_db_read_only_confirmed: bool = False
+    sample_installations: int = 0
+    purchase_date_is_proxy: bool = False
 
 
 def get_config() -> AppConfig:
     demo_mode = _as_bool(os.getenv("IQ_DEMO_MODE"), default=False)
+    sample_installations = int(os.getenv("IQ_SAMPLE_INSTALLATIONS", "0"))
+    if sample_installations < 0:
+        raise ValueError("IQ_SAMPLE_INSTALLATIONS must be zero or a positive integer.")
 
     def mapped_column(name: str, default: str = "", demo_default: str = "") -> str:
         configured = os.getenv(name, "").strip()
@@ -75,6 +80,8 @@ def get_config() -> AppConfig:
 
     return AppConfig(
         demo_mode=demo_mode,
+        sample_installations=sample_installations,
+        purchase_date_is_proxy=_as_bool(os.getenv("IQ_PURCHASE_DATE_IS_PROXY"), default=False),
         demo_csv_path=demo_csv_path,
         db_server=os.getenv("IQ_DB_SERVER", "localhost"),
         db_port=int(os.getenv("IQ_DB_PORT", "1433")),

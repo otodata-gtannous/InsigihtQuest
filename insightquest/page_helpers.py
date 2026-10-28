@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import streamlit as st
+from PIL import Image
 from sqlalchemy.engine import Engine
 
 from insightquest.config import AppConfig, get_config
@@ -75,10 +76,40 @@ def warn_if_row_limit_reached(row_count: int, limit: int) -> None:
         )
 
 
+LOGO_PATH = Path(__file__).resolve().parents[1] / "assets" / "insightquest-logo.png"
+
+
+def app_page_icon() -> Image.Image:
+    return Image.open(LOGO_PATH)
+
+
+def render_app_logo() -> None:
+    st.logo(str(LOGO_PATH), size="large")
+
+
+def render_dataset_scope(config: AppConfig) -> None:
+    if config.demo_mode:
+        return
+    if config.sample_installations:
+        st.warning(
+            f"INSTALLATION SAMPLE: the latest {config.sample_installations:,} installed devices, "
+            "ranked by tank installation date with initial device installation date as fallback. "
+            "Older and uninstalled devices are excluded. Results are not all-time population totals; "
+            "purchase trends, pending counts, and forecasts are selection-biased."
+        )
+    if config.purchase_date_is_proxy:
+        st.info(
+            "PurchaseDate is the earliest nondeleted warranty start date, not a confirmed "
+            "order or shipment date. Purchase-to-install delay uses this proxy."
+        )
+
+
 def render_analysis_page(title: str, description: str) -> None:
+    render_app_logo()
     st.title(title)
     st.caption(description)
     config = get_config()
+    render_dataset_scope(config)
     if config.demo_mode:
         st.warning(
             f"DEMO MODE — synthetic data from `{config.demo_csv_path.name}`; "

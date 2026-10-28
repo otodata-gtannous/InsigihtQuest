@@ -3,6 +3,24 @@
 InsightQuest is a Streamlit analytics app. All analysis is read from one
 configured SQL Server flat table.
 
+## The six questions InsightQuest answers
+
+The app exists to help classify the **installation capacity of our customers**.
+It is built around six analysis questions (originally posed in French):
+
+| # | Question (FR) | Question (EN) | Page |
+| --- | --- | --- | --- |
+| 1 | Pics et creux des achats et installations | Peaks and lows of purchases and installations | Purchases & installations |
+| 2 | Écarts par territoire et taille des clients et type de produit | Gaps by territory, customer size, and product type | Territory, customer & product mix |
+| 3 | Délai entre expédition et installation | Delay between shipping and installation | Shipping to installation |
+| 4 | Taux mensuel d'installation | Monthly installation rate | Installation rate & forecasts |
+| 5 | Prévisibilité des achats versus les marchés | Purchase predictability versus markets | Installation rate & forecasts |
+| 6 | Seuils critiques pour risques de rupture ou de surstock | Critical thresholds for stockout or overstock risk | Inventory risk |
+
+See [Question coverage and data readiness](#question-coverage-and-data-readiness)
+for what each question needs from the flat table, and
+[Design decisions](#design-decisions-and-roadmap) for architecture notes.
+
 ## Analysis pages
 
 - **Overview** (`dashboard.py`): installation map, territory trend, projections,
@@ -116,7 +134,26 @@ decisions. Set `IQ_DEMO_CSV` to select a different CSV file.
 Use the **Export results to Excel** button on a page to download the available
 tables and chart data as an `.xlsx` workbook.
 
-## How it answers the six questions
+## Question coverage and data readiness
+
+Pages never invent missing data: when a required column is not mapped or does
+not exist, the page shows a readiness message instead of a result. Status below
+reflects the confirmed flat-table columns (see section 2) plus the extractor's
+`Territory` column.
+
+| # | Status | What works today | What is missing to be complete |
+| --- | --- | --- | --- |
+| 1 | Partial | Installation peaks/lows by day/week/month; purchase peaks/lows when a purchase measure is mapped | `IQ_COL_SALES_AMOUNT` (no purchase amount column exists; purchase row counts are not yet a fallback) |
+| 2 | Partial | Product type (`DeviceType`) and customer (`CompanyId`) work by default; territory works after `IQ_COL_TERRITORY=Territory` | Customer size: no column exists. A derived segment (for example, device-count buckets per `CompanyId`) must be added in the extractor and mapped to `IQ_COL_CUSTOMER_SIZE` |
+| 3 | Not yet | Page and calculations are ready (median, P90, exclusions) | A shipment date mapped to `IQ_COL_SHIPPED_AT`; `PurchaseDate` is derived and must not be used silently as a proxy |
+| 4 | Partial | Monthly installation counts and forecast | A shipment date and eligible-unit denominator for the true rate |
+| 5 | Partial | Separate Holt-Winters forecasts with backtests (MAE, RMSE, MAPE) | A purchase measure and an external monthly market indicator (`IQ_COL_MARKET_INDICATOR`, `IQ_COL_MARKET_INDICATOR_AT`) |
+| 6 | Not yet | Page and risk rules are ready | An inventory snapshot source: item, as-of date, on-hand, demand, replenishment days, reorder point, maximum stock |
+
+Questions 5 and 6 need data that is not a device attribute (market series,
+inventory snapshots); see the design notes below.
+
+## How each question is answered
 
 1. **Purchase/install peaks and lows:** daily, weekly, or monthly totals ranked by period.
 2. **Territory, customer size, and product differences:** installation counts grouped by the configured dimensions; no segments are inferred.
@@ -147,6 +184,12 @@ pip install -r requirements.txt
    - `IQ_DB_AUTH_MODE=auto` to infer from config (`IQ_DB_USER` empty => windows)
 
 ## 2) Configure the flat-table source
+
+For an installation-selected Azure sample, set `IQ_SAMPLE_INSTALLATIONS` to its
+size and `IQ_PURCHASE_DATE_IS_PROXY=true` when purchase dates are warranty-start
+proxies. The dashboard displays scope/interpretation warnings. Such samples
+exclude older/uninstalled devices and must not be treated as all-time totals or
+unbiased forecasting data. See the [Azure refresh instructions](extractor/README.md).
 
 The app uses a single consolidated flat table for every dataset:
 - `IQ_SOURCE_MODE=flat-table`
@@ -249,6 +292,66 @@ a SQL login and set `IQ_DB_SERVER` to a host reachable from the container (not
 Microsoft ODBC Driver 18. Do not copy secrets into the image or commit `.env`;
 provide production secrets through the deployment platform's environment or
 secret-management settings.
+
+## Design decisions and roadmap
+
+These come from a review of the repository against the six questions.
+
+### Is a star schema needed?
+
+**Not now.** The flat table is one row per device, so questions 1–4 are exact
+device counts and do not need dimension tables. Keep `dbo.[Insight Project]`
+as the app's read source. A full star schema is only worth it if more grains
+(orders, shipments, several markets) are added later.
+
+Questions 5 and 6 need data at a different grain and should be small side
+tables, not columns repeated on every device row (repeating snapshots per
+device would inflate any `SUM`):
+
+- Inventory snapshot: item × as-of date (on-hand, demand, replenishment days,
+  reorder point, maximum stock).
+- Market indicator: indicator × month.
+- Optional customer table (`CompanyId`, size, territory) if size or territory
+  is not clean on the flat table; optional shipment table if shipments are not
+  one-to-one with devices.
+
+Expose them through views, point `IQ_SOURCE_TABLE` / `IQ_COL_*` at the view
+columns, and add them as extractor migrations. Customer-level attributes must
+be counted with `COUNT(DISTINCT CompanyId)`, never summed across device rows.
+
+### Backend data access
+
+Direct SQL Server access from Streamlit is appropriate for this internal tool
+and stays. Planned changes, in priority order:
+
+1. Push aggregation into SQL (`GROUP BY`) instead of loading up to 100,000 raw
+   rows into pandas; index the date, company, and type columns.
+2. Cache query results with a TTL and add a refresh button.
+3. Use a dedicated SELECT-only database login instead of relying on the
+   `IQ_AI_DB_READ_ONLY_CONFIRMED` attestation alone.
+4. Run the demo CSV and the database through the same query path so the two
+   modes behave identically.
+5. Build the ODBC connection with escaped values and set explicit pool and
+   query-timeout settings.
+
+The Ask-the-data flow keeps its current design: the model only returns a plan
+validated against a fixed allowlist, SQL is built locally from mapped columns
+with bound parameters, and no row data is sent to the model.
+
+### UI and structure
+
+Planned changes:
+
+- Make the home page a guide to the six questions with links to each page.
+- Prefix page titles with the question number and give question 5 its own page
+  (it currently shares a page with question 4).
+- Extract the repeated page scaffolding (filters, row limit, readiness checks,
+  error handling) into a shared helper, and show friendly errors instead of
+  stack traces.
+- Cache page loaders and split `insightquest/analytics.py` per question.
+- Add French (fr-CA) UI text alongside English.
+- Remove the empty `src/insightquest/` folder; the package lives at
+  `insightquest/`.
 
 ## Notes on projection
 

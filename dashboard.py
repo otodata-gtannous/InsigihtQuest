@@ -26,13 +26,17 @@ from insightquest.data import (
 )
 from insightquest.exports import render_excel_download
 from insightquest.page_helpers import (
+    app_page_icon,
     get_engine,
     get_source_columns,
     missing_source_fields,
+    render_app_logo,
+    render_dataset_scope,
     show_source_readiness,
 )
 
-st.set_page_config(page_title="InsightQuest", layout="wide")
+st.set_page_config(page_title="InsightQuest", page_icon=app_page_icon(), layout="wide")
+render_app_logo()
 
 
 @st.cache_resource
@@ -72,6 +76,7 @@ def _load_diagnostics(from_date: date, to_date: date) -> pd.DataFrame:
 def main() -> None:
     st.title("InsightQuest")
     st.caption("Explore monitor installations, trends, projections, and sales by territory")
+    render_dataset_scope(get_config())
 
     st.sidebar.header("Filters")
     default_to = date.today()

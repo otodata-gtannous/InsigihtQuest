@@ -29,6 +29,7 @@ from insightquest.ai_query import (
     propose_query,
 )
 from insightquest.page_helpers import (
+    app_page_icon,
     get_source_context,
     render_analysis_page,
     warn_if_row_limit_reached,
@@ -181,7 +182,11 @@ def render_guided_queries() -> None:
         st.caption("AI-generated interpretation; verify it against the local results above.")
 
 
-st.set_page_config(page_title="Ask the Data | InsightQuest", layout="wide")
+st.set_page_config(
+    page_title="Ask the Data | InsightQuest",
+    page_icon=app_page_icon(),
+    layout="wide",
+)
 render_analysis_page("Ask the data", "The model plans; your server validates and calculates.")
 mode = st.radio("Analysis mode", ["Private (fixed labels only)", "Guided (approved external sharing)"])
 if mode == "Guided (approved external sharing)":
