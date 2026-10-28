@@ -1,0 +1,15 @@
+[theme]
+# Dark is the product's baseline. insightquest/charts.py and the map colours are
+# designed against these exact values: change them together (see charts.py THEME).
+base = "dark"
+primaryColor = "#38BDF8"
+backgroundColor = "#0B1220"
+secondaryBackgroundColor = "#131D2F"
+textColor = "#E6EDF3"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"

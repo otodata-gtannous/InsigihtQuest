@@ -9,9 +9,9 @@ import pandas as pd
 from sqlalchemy.engine import Engine
 
 from insightquest.config import AppConfig
-from insightquest.data import fetch_flat_table_columns, fetch_flat_table_rows
+from insightquest.data import fetch_chat_groups, fetch_chat_row_profile, fetch_flat_table_columns
 
-MAX_SOURCE_ROWS = 100_000
+MAX_QUERY_GROUPS = 100_000  # safety net on the grouped result, independent of source row count
 MAX_RESULT_ROWS = 50
 MIN_GROUP_ROWS = 10
 MAX_QUESTION_LENGTH = 2_000
@@ -193,12 +193,17 @@ class QueryResult:
 
 
 def execute_query(engine: Engine | None, config: AppConfig, plan: QueryPlan) -> QueryResult:
-    plan = validate_plan(plan.payload())
     if not config.demo_mode and not config.ai_db_read_only_confirmed:
         raise ValueError(
             "Configure a SELECT-only database account/source and set "
             "IQ_AI_DB_READ_ONLY_CONFIRMED=true before using guided database queries."
         )
+    return execute_plan_locally(engine, config, plan)
+
+
+def execute_plan_locally(engine: Engine | None, config: AppConfig, plan: QueryPlan) -> QueryResult:
+    """Run a validated plan that was built locally (no model); same reader and limits as guided queries."""
+    plan = validate_plan(plan.payload())
     if plan.metric == Metric.UNSUPPORTED:
         raise ValueError("This question cannot be represented by the supported query operations.")
     fields = {"purchase_date"} if plan.metric == Metric.PURCHASES else {"install_date"}
@@ -213,17 +218,38 @@ def execute_query(engine: Engine | None, config: AppConfig, plan: QueryPlan) -> 
         column = getattr(config, FIELDS[field])
         if not column or column.casefold() not in available:
             raise ValueError(f"The required {field} mapping is unavailable.")
-    data = fetch_flat_table_rows(
-        engine, config, {field: FIELDS[field] for field in sorted(fields)},
-        date_field=FIELDS[plan.date_field] if plan.date_field != DateField.NONE else None,
-        from_date=plan.start_date, to_date=plan.end_date, limit=MAX_SOURCE_ROWS + 1,
+    filtering = plan.date_field != DateField.NONE
+    scope = {
+        "scope_attr": FIELDS[plan.date_field.value] if filtering else None,
+        "from_date": plan.start_date, "to_date": plan.end_date,
+    }
+    event_field = "purchase_date" if plan.metric in {Metric.PURCHASES, Metric.PENDING} else "install_date"
+    # Counts and delay statistics are computed by the database; no source rows are loaded.
+    source_rows = fetch_chat_row_profile(engine, config, **scope)["row_count"]
+    groups = fetch_chat_groups(
+        engine, config, _MODES[plan.metric],
+        grouping={GroupBy.NONE: "none", GroupBy.PERIOD: "period", GroupBy.TYPE: "value"}[plan.group_by],
+        event_attr=FIELDS[event_field],
+        group_attr=FIELDS["device_type"] if plan.group_by == GroupBy.TYPE else None,
+        grain=plan.period.value, order="group", limit=MAX_QUERY_GROUPS + 1, **scope,
     )
-    if len(data) > MAX_SOURCE_ROWS:
+    if len(groups) > MAX_QUERY_GROUPS:
         raise ValueError(
-            f"The query exceeds {MAX_SOURCE_ROWS:,} source rows. Narrow the date range; "
-            "partial results will not be used."
+            f"The query produces more than {MAX_QUERY_GROUPS:,} groups. "
+            "Use a coarser grouping or a different date range."
         )
-    return aggregate_query(data, plan)
+    return _rank_groups(plan, _plan_table(groups, plan), source_rows, source_rows - int(groups["count"].sum()))
+
+
+_MODES = {
+    Metric.PURCHASES: "events", Metric.INSTALLATIONS: "events",
+    Metric.PENDING: "pending", Metric.DELAY: "delay",
+}
+
+
+def _plan_table(groups: pd.DataFrame, plan: QueryPlan) -> pd.DataFrame:
+    columns = ["group", "count"] + (["mean_days", "median_days"] if plan.metric == Metric.DELAY else [])
+    return groups[columns].copy()
 
 
 def aggregate_query(frame: pd.DataFrame, plan: QueryPlan) -> QueryResult:
@@ -262,7 +288,14 @@ def aggregate_query(frame: pd.DataFrame, plan: QueryPlan) -> QueryResult:
     table = grouped.size().reset_index(name="count")
     if plan.metric == Metric.DELAY:
         delay = grouped["delay_days"].agg(mean_days="mean", median_days="median").reset_index()
-        table = table.merge(delay, on="group").round(2)
+        table = table.merge(delay, on="group")
+    return _rank_groups(plan, table, source_rows, excluded_rows)
+
+
+def _rank_groups(plan: QueryPlan, table: pd.DataFrame, source_rows: int, excluded_rows: int) -> QueryResult:
+    """Round, flag small groups before top-N, order with deterministic tie-breaks, and cap to top-N."""
+    if plan.metric == Metric.DELAY:
+        table = table.round(2)
     small_groups = bool((table["count"] < MIN_GROUP_ROWS).any())
     sort_by = "group" if plan.group_by == GroupBy.PERIOD else (
         "median_days" if plan.metric == Metric.DELAY else "count"

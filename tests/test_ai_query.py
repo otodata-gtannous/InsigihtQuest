@@ -11,7 +11,7 @@ import pandas as pd
 
 from insightquest.ai_chat import Analysis, execute_analysis, planner_payload
 from insightquest.ai_query import (
-    MAX_SOURCE_ROWS,
+    MAX_QUERY_GROUPS,
     MIN_GROUP_ROWS,
     Metric,
     aggregate_payload,
@@ -33,6 +33,10 @@ def plan_values(**changes: object) -> dict[str, object]:
     }
     values.update(changes)
     return values
+
+
+def _groups(frame: pd.DataFrame) -> pd.DataFrame:
+    return frame.rename(columns={"grp": "group", "cnt": "count"})
 
 
 def response(content: str | None) -> SimpleNamespace:
@@ -188,35 +192,30 @@ class GuidedQueryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "fewer than"):
             aggregate_payload(result)
 
-    def test_row_limit_overflow_is_not_aggregated(self) -> None:
+    def test_large_sources_are_aggregated_by_the_database_without_a_row_cap(self) -> None:
+        config = replace(self.config, demo_mode=False, ai_db_read_only_confirmed=True)
+        big = 5_000_000
+        replies = iter([pd.DataFrame({"row_count": [big]}), pd.DataFrame({"grp": ["All matching rows"], "cnt": [big]})])
         with (
             patch("insightquest.ai_query.fetch_flat_table_columns", return_value={"TankInstallDate"}),
-            patch("insightquest.ai_query.fetch_flat_table_rows", return_value=pd.DataFrame(index=range(MAX_SOURCE_ROWS + 1))) as fetch,
+            patch("insightquest.data.fetch_flat_table_columns", return_value={"TankInstallDate"}),
+            patch("insightquest.data._read_aggregate", side_effect=lambda *a: next(replies)),
+            patch("insightquest.data.fetch_flat_table_rows", side_effect=AssertionError("raw rows read")),
         ):
-            with self.assertRaisesRegex(ValueError, "partial results"):
-                execute_query(None, self.config, validate_plan(plan_values()))
-        self.assertEqual(fetch.call_args.kwargs["limit"], MAX_SOURCE_ROWS + 1)
+            result = execute_query(MagicMock(), config, validate_plan(plan_values()))
+        self.assertEqual(result.table.iloc[0]["count"], big)
+        self.assertEqual((result.source_rows, result.excluded_rows), (big, 0))
 
-    def test_exact_source_limit_is_accepted(self) -> None:
-        frame = pd.DataFrame({"install_date": ["2026-01-01"] * MAX_SOURCE_ROWS})
-        with (
-            patch("insightquest.ai_query.fetch_flat_table_columns", return_value={"TankInstallDate"}),
-            patch("insightquest.ai_query.fetch_flat_table_rows", return_value=frame),
-        ):
-            result = execute_query(None, self.config, validate_plan(plan_values()))
-        self.assertEqual(result.table.iloc[0]["count"], MAX_SOURCE_ROWS)
-
-    def test_only_required_columns_are_requested(self) -> None:
-        with (
-            patch("insightquest.ai_query.fetch_flat_table_columns", return_value={"TankInstallDate"}),
-            patch("insightquest.ai_query.fetch_flat_table_rows", return_value=pd.DataFrame({"install_date": ["2026-01-01"]})) as fetch,
-        ):
-            execute_query(None, self.config, validate_plan(plan_values()))
-        self.assertEqual(fetch.call_args.args[2], {"install_date": "col_installed_at"})
+    def test_group_count_safety_net_does_not_depend_on_source_rows(self) -> None:
+        many = pd.DataFrame({"grp": [f"t{i}" for i in range(MAX_QUERY_GROUPS + 1)], "cnt": 1})
+        with patch("insightquest.ai_query.fetch_chat_row_profile", return_value={"row_count": 1}), \
+                patch("insightquest.ai_query.fetch_chat_groups", return_value=_groups(many)):
+            with self.assertRaisesRegex(ValueError, "more than 100,000 groups"):
+                execute_query(None, self.config, validate_plan(plan_values(group_by="device_type")))
 
     def test_missing_mapping_fails_without_reading_rows(self) -> None:
         with (
-            patch("insightquest.ai_query.fetch_flat_table_rows") as fetch,
+            patch("insightquest.ai_query.fetch_chat_groups") as fetch,
             self.assertRaisesRegex(ValueError, "mapping is unavailable"),
         ):
             execute_query(None, replace(self.config, col_installed_at=""), validate_plan(plan_values()))
@@ -235,19 +234,21 @@ class GuidedQueryTests(unittest.TestCase):
             date_field="install_date", start_date="2026-01-01", end_date="2026-01-31",
         ))
         engine = MagicMock()
+        replies = iter([pd.DataFrame({"row_count": [1]}), pd.DataFrame({"grp": ["All matching rows"], "cnt": [1]})])
         with (
             patch("insightquest.ai_query.fetch_flat_table_columns", return_value={"TankInstallDate"}),
             patch("insightquest.data.fetch_flat_table_columns", return_value={"TankInstallDate"}),
-            patch("insightquest.data.pd.read_sql", return_value=pd.DataFrame({"install_date": ["2026-01-01"]})) as read,
+            patch("insightquest.data._read_aggregate", side_effect=lambda *a: next(replies)) as read,
         ):
             execute_query(engine, config, plan)
-        sql = str(read.call_args.args[0])
-        self.assertTrue(sql.startswith("SELECT TOP (:limit)"))
-        self.assertIn(">= :start_dt", sql)
-        self.assertIn("< :end_exclusive", sql)
-        self.assertNotIn("2026-01-01", sql)
-        self.assertNotIn("Id", sql)
-        self.assertEqual(read.call_args.kwargs["params"]["end_exclusive"].isoformat(), "2026-02-01T00:00:00")
+        for call in read.call_args_list:
+            sql, params = call.args[1], call.args[2]
+            self.assertTrue(sql.lstrip().startswith(("SELECT", "WITH")))
+            self.assertIn("[TankInstallDate] >= :start_dt", sql)
+            self.assertIn("< :end_exclusive", sql)
+            self.assertNotIn("2026-01-01", sql)
+            self.assertNotIn("Id", sql)
+            self.assertEqual(params["end_exclusive"].isoformat(), "2026-02-01T00:00:00")
 
     def test_query_timeout_is_set_on_odbc_connection_not_cursor(self) -> None:
         with patch("insightquest.db.create_engine") as create, patch("insightquest.db.event.listens_for") as listen:

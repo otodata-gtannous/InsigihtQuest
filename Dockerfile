@@ -1,6 +1,9 @@
 FROM python:3.12-slim-bookworm
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
+ARG APP_ENTRY=dashboard.py
+
+ENV APP_ENTRY=${APP_ENTRY} \
+    PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
@@ -32,4 +35,4 @@ EXPOSE 8501
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD ["python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8501/_stcore/health', timeout=2)"]
 
-CMD ["streamlit", "run", "dashboard.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]
+CMD ["sh", "-c", "exec streamlit run \"$APP_ENTRY\" --server.address=0.0.0.0 --server.port=8501 --server.headless=true"]
